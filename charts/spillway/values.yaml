@@ -1,5 +1,6 @@
-# -- Number of replicas. Use 2 for HA (leader election keeps only one active).
-replicaCount: 1
+# -- Number of replicas. Leader election keeps only one active; the second
+# stands by so a restart or rolling update never leaves the cluster unprotected.
+replicaCount: 2
 
 image:
   # -- Image repository
@@ -134,8 +135,10 @@ metrics:
     annotations: {}
 
 podDisruptionBudget:
-  # -- Create a PodDisruptionBudget. Recommended when replicaCount > 1.
-  enabled: false
+  # -- Create a PodDisruptionBudget. Enabled by default to match the default
+  # replicaCount of 2 — ensures node drains and rolling updates always leave
+  # at least one replica running.
+  enabled: true
   # -- Minimum number of available replicas. Mutually exclusive with maxUnavailable.
   minAvailable: 1
   # maxUnavailable: 1
@@ -145,6 +148,15 @@ networkPolicy:
   enabled: false
   # -- Extra ingress rules added to the NetworkPolicy (e.g. to allow specific scraper pods).
   # ingress: []
+
+admissionPolicy:
+  # -- Create a ValidatingAdmissionPolicy that validates the
+  # spillway.kroy.io/default-replicate label value on Namespace objects.
+  # Requires Kubernetes 1.30+.
+  enabled: false
+  # -- Validation action: Deny blocks the request; Warn allows it with a warning;
+  # Audit records it without blocking.
+  validationActions: [Deny]
 
 # -- Create the spillway-system namespace. Set to false if the namespace already exists
 # or is managed externally.

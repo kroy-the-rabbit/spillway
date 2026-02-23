@@ -1,0 +1,66 @@
+# ValidatingAdmissionPolicy — Spillway namespace label governance
+#
+# Validates the spillway.kroy.io/default-replicate label whenever it is
+# added or updated on a Namespace.  The label value must be a non-empty
+# string containing only valid spillway selector tokens:
+#   all | * | explicit-namespace | glob-pattern (containing *)
+#   Multiple tokens are comma-separated.
+#
+# Requires Kubernetes 1.30+ (ValidatingAdmissionPolicy GA).
+# Apply standalone:  kubectl apply -f config/policy/namespace-label-policy.yaml
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: spillway-namespace-label
+  labels:
+    app.kubernetes.io/name: spillway
+    app.kubernetes.io/component: admission-policy
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups:   [""]
+        apiVersions: ["v1"]
+        operations:  ["CREATE", "UPDATE"]
+        resources:   ["namespaces"]
+  variables:
+    - name: labelValue
+      expression: >
+        has(object.metadata.labels) &&
+        'spillway.kroy.io/default-replicate' in object.metadata.labels
+          ? object.metadata.labels['spillway.kroy.io/default-replicate']
+          : ''
+    - name: hasLabel
+      expression: >
+        has(object.metadata.labels) &&
+        'spillway.kroy.io/default-replicate' in object.metadata.labels
+    # Split on commas, trim whitespace, drop empties.
+    - name: tokens
+      expression: >
+        variables.hasLabel
+          ? variables.labelValue.split(',').filter(t, t.trim() != '')
+          : []
+    # Each token must be non-empty. Pattern content is permissive — the
+    # controller will ignore malformed globs at runtime.
+    - name: allTokensNonEmpty
+      expression: >
+        variables.tokens.all(t, t.trim() != '')
+  validations:
+    - expression: >
+        !variables.hasLabel || (variables.tokens.size() > 0 && variables.allTokensNonEmpty)
+      message: >
+        spillway.kroy.io/default-replicate must be a non-empty comma-separated
+        list of namespace selectors (e.g. "all", "team-*", "payments,prod").
+      reason: Invalid
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: spillway-namespace-label
+  labels:
+    app.kubernetes.io/name: spillway
+    app.kubernetes.io/component: admission-policy
+spec:
+  policyName: spillway-namespace-label
+  validationActions: [Deny]
