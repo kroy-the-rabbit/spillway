@@ -8,14 +8,9 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-	"sigs.k8s.io/controller-runtime/pkg/handler"
-	"sigs.k8s.io/controller-runtime/pkg/predicate"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
 type ConfigMapReconciler struct {
@@ -35,7 +30,7 @@ func (r *ConfigMapReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, err
 	}
 
-	if isManagedReplica(&src) || isSkipped(&src) {
+	if isManagedReplica(&src) {
 		return ctrl.Result{}, nil
 	}
 
@@ -45,17 +40,6 @@ func (r *ConfigMapReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		kind:      "ConfigMap",
 		namespace: src.Namespace,
 		name:      src.Name,
-	}
-
-	// Fall back to the namespace-level default selector when the object has no
-	// per-object annotation.
-	if selector.empty() {
-		var ns corev1.Namespace
-		if err := r.Get(ctx, types.NamespacedName{Name: src.Namespace}, &ns); err != nil && !apierrors.IsNotFound(err) {
-			return ctrl.Result{}, err
-		} else if err == nil {
-			selector = nsDefaultSelector(ns)
-		}
 	}
 
 	if !src.DeletionTimestamp.IsZero() {
@@ -152,32 +136,8 @@ func (r *ConfigMapReconciler) cleanupReplicatedConfigMaps(ctx context.Context, d
 	return nil
 }
 
-// namespacesToConfigMaps maps a Namespace event to reconcile requests for every
-// ConfigMap in that namespace. Used to react to namespace label changes.
-func (r *ConfigMapReconciler) namespacesToConfigMaps(ctx context.Context, obj client.Object) []reconcile.Request {
-	var list corev1.ConfigMapList
-	if err := r.List(ctx, &list, client.InNamespace(obj.GetName())); err != nil {
-		return nil
-	}
-	reqs := make([]reconcile.Request, 0, len(list.Items))
-	for i := range list.Items {
-		reqs = append(reqs, reconcile.Request{
-			NamespacedName: types.NamespacedName{
-				Name:      list.Items[i].Name,
-				Namespace: list.Items[i].Namespace,
-			},
-		})
-	}
-	return reqs
-}
-
 func (r *ConfigMapReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&corev1.ConfigMap{}).
-		Watches(
-			&corev1.Namespace{},
-			handler.EnqueueRequestsFromMapFunc(r.namespacesToConfigMaps),
-			builder.WithPredicates(predicate.LabelChangedPredicate{}),
-		).
 		Complete(r)
 }

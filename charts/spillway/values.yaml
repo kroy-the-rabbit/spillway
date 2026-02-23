@@ -149,15 +149,6 @@ networkPolicy:
   # -- Extra ingress rules added to the NetworkPolicy (e.g. to allow specific scraper pods).
   # ingress: []
 
-admissionPolicy:
-  # -- Create a ValidatingAdmissionPolicy that validates the
-  # spillway.kroy.io/default-replicate label value on Namespace objects.
-  # Requires Kubernetes 1.30+.
-  enabled: false
-  # -- Validation action: Deny blocks the request; Warn allows it with a warning;
-  # Audit records it without blocking.
-  validationActions: [Deny]
-
 # -- Create the spillway-system namespace. Set to false if the namespace already exists
 # or is managed externally.
 createNamespace: true

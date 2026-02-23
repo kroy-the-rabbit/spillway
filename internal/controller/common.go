@@ -19,15 +19,6 @@ const (
 	AnnotationReplicateTo = "spillway.kroy.io/replicate-to"
 	AnnotationExcludeNS   = "spillway.kroy.io/exclude-namespaces"
 
-	// LabelDefaultReplicate on a Namespace sets the default replication target
-	// selector for all Secrets and ConfigMaps in that namespace that have no
-	// per-object spillway.kroy.io/replicate-to annotation.
-	LabelDefaultReplicate = "spillway.kroy.io/default-replicate"
-
-	// AnnotationSkip on a Secret or ConfigMap tells spillway to leave it alone
-	// entirely, even when its namespace has a default-replicate label.
-	AnnotationSkip = "spillway.kroy.io/skip"
-
 	// AnnotationForceAdopt on a source Secret or ConfigMap tells spillway to
 	// overwrite pre-existing objects in target namespaces even if they were not
 	// previously managed by spillway. Use this to take ownership of objects
@@ -176,10 +167,6 @@ func isManagedReplica(obj metav1.Object) bool {
 	return obj.GetAnnotations()[AnnotationManagedBy] == ManagedByValue
 }
 
-func isSkipped(obj metav1.Object) bool {
-	return obj.GetAnnotations()[AnnotationSkip] == "true"
-}
-
 func matchesSource(obj metav1.Object, kind, namespace, name string) bool {
 	ann := obj.GetAnnotations()
 	return ann[AnnotationManagedBy] == ManagedByValue &&
@@ -252,13 +239,6 @@ func listTargetSelector(obj metav1.Object) targetSelector {
 
 func listExcludeSelector(obj metav1.Object) targetSelector {
 	return parseTargetSelector(obj.GetAnnotations()[AnnotationExcludeNS])
-}
-
-// nsDefaultSelector returns the replication target selector derived from the
-// namespace's LabelDefaultReplicate label. Returns an empty selector when the
-// label is absent or blank.
-func nsDefaultSelector(ns corev1.Namespace) targetSelector {
-	return parseTargetSelector(ns.Labels[LabelDefaultReplicate])
 }
 
 func isForceAdopt(obj metav1.Object) bool {
