@@ -1,0 +1,27 @@
+spillway has been installed in namespace {{ .Release.Namespace }}.
+
+Controller replicas: {{ .Values.replicaCount }}
+Leader election:     {{ .Values.controller.leaderElect }}
+Sync period:         {{ .Values.controller.syncPeriod }}
+
+{{- if gt (int .Values.replicaCount) 1 }}
+
+NOTE: Running {{ .Values.replicaCount }} replicas with leader election. Only one
+replica will actively reconcile at a time; the others stand by.
+{{- end }}
+
+To annotate a Secret for cross-namespace replication:
+
+  kubectl annotate secret <name> -n <namespace> \
+    spillway.kroy.io/replicate-to="team-*,sandbox"
+
+Supported values for spillway.kroy.io/replicate-to:
+  all / *        - every namespace except the source
+  team-*         - glob pattern
+  payments,prod  - explicit comma-separated namespaces
+
+{{- if .Values.metrics.service.enabled }}
+
+Metrics are available on:
+  http://{{ include "spillway.fullname" . }}-metrics.{{ .Release.Namespace }}.svc:{{ .Values.metrics.service.port }}/metrics
+{{- end }}

@@ -1,0 +1,119 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      IMAGE_REPO: ghcr.io/kroy-the-rabbit/spillway
+      CHART_OCI_REPO: oci://ghcr.io/kroy-the-rabbit/charts
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+
+      - name: Set release variables
+        id: vars
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "is_prerelease=$([[ "$VERSION" == *-* ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          echo "major_minor=$(echo "$VERSION" | cut -d. -f1,2)" >> "$GITHUB_OUTPUT"
+          echo "major=$(echo "$VERSION" | cut -d. -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Validate semver tag and chart versions
+        shell: bash
+        run: |
+          TAG="${{ steps.vars.outputs.tag }}"
+          VERSION="${{ steps.vars.outputs.version }}"
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]
+          chart_version="$(awk '/^version:/{print $2}' charts/spillway/Chart.yaml)"
+          app_version="$(awk -F'"' '/^appVersion:/{print $2}' charts/spillway/Chart.yaml)"
+          test "$chart_version" = "$VERSION"
+          test "$app_version" = "$VERSION"
+
+      - name: Run tests
+        run: go test ./...
+
+      - name: Build Linux binaries
+        shell: bash
+        run: |
+          mkdir -p dist
+          for arch in amd64 arm64; do
+            out="spillway_${{ steps.vars.outputs.version }}_linux_${arch}"
+            GOOS=linux GOARCH="${arch}" CGO_ENABLED=0 go build \
+              -ldflags="-s -w -X main.version=${{ steps.vars.outputs.tag }}" \
+              -o "dist/${out}/spillway" ./cmd/spillway
+            tar -C "dist/${out}" -czf "dist/${out}.tar.gz" spillway
+            rm -rf "dist/${out}"
+          done
+          (cd dist && sha256sum *.tar.gz > checksums.txt)
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Extract image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_REPO }}
+          tags: |
+            type=raw,value=${{ steps.vars.outputs.tag }}
+            type=raw,value=latest,enable=${{ steps.vars.outputs.is_prerelease == 'false' }}
+            type=raw,value=${{ steps.vars.outputs.major_minor }},enable=${{ steps.vars.outputs.is_prerelease == 'false' }}
+            type=raw,value=${{ steps.vars.outputs.major }},enable=${{ steps.vars.outputs.is_prerelease == 'false' }}
+
+      - name: Build and push container image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            VERSION=${{ steps.vars.outputs.tag }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Package and push Helm chart (OCI)
+        shell: bash
+        run: |
+          mkdir -p dist
+          helm lint charts/spillway
+          helm package charts/spillway --destination dist
+          helm push "dist/spillway-${{ steps.vars.outputs.version }}.tgz" "${{ env.CHART_OCI_REPO }}"
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          prerelease: ${{ steps.vars.outputs.is_prerelease == 'true' }}
+          files: |
+            dist/*.tar.gz
+            dist/checksums.txt
+

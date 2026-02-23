@@ -1,0 +1,27 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "spillway.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "spillway.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "spillway.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    # Allow liveness/readiness probes from the kubelet (node IP, no label selector available)
+    - ports:
+        - port: 8081
+          protocol: TCP
+    # Allow Prometheus scrape traffic to the metrics port
+    - ports:
+        - port: 8080
+          protocol: TCP
+      {{- with .Values.networkPolicy.ingress }}
+      {{- toYaml . | nindent 6 }}
+      {{- end }}
+{{- end }}

@@ -1,0 +1,151 @@
+# -- Number of replicas. Use 2 for HA (leader election keeps only one active).
+replicaCount: 1
+
+image:
+  # -- Image repository
+  repository: ghcr.io/kroy-the-rabbit/spillway
+  # -- Image pull policy. Use Always when using mutable tags.
+  pullPolicy: IfNotPresent
+  # -- Image tag. Defaults to the chart's appVersion when empty.
+  tag: ""
+
+# -- Secrets used to pull the image from a private registry.
+imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  # -- Create a ServiceAccount.
+  create: true
+  # -- Annotations to add to the ServiceAccount (e.g. for IRSA / Workload Identity).
+  annotations: {}
+  # -- Override the name of the ServiceAccount. Defaults to the fullname.
+  name: ""
+
+# -- Annotations added to the controller Pod.
+podAnnotations: {}
+
+# -- Extra labels added to the controller Pod.
+podLabels: {}
+
+# -- Pod-level security context.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
+# -- Container-level security context.
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 65532
+  capabilities:
+    drop: ["ALL"]
+
+# Controller flags
+controller:
+  # -- Enable leader election (required when replicaCount > 1).
+  leaderElect: true
+  # -- Periodic full resync interval. Parsed by Go's time.ParseDuration.
+  syncPeriod: 5m
+  # -- Address for the Prometheus metrics endpoint.
+  metricsBindAddress: ":8080"
+  # -- Address for the health and readiness probe endpoints.
+  healthProbeBindAddress: ":8081"
+
+# -- Resource requests and limits for the controller container.
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: probes
+  initialDelaySeconds: 15
+  periodSeconds: 20
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /readyz
+    port: probes
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+# -- Seconds the Pod is given to finish in-flight reconciliations on shutdown.
+terminationGracePeriodSeconds: 10
+
+# -- Node selector applied to the controller Pod.
+nodeSelector: {}
+
+# -- Tolerations applied to the controller Pod.
+tolerations: []
+
+# -- Affinity rules applied to the controller Pod.
+# For HA, consider a podAntiAffinity rule to spread replicas across nodes.
+affinity: {}
+
+# -- TopologySpreadConstraints for the controller Pod.
+# Example for zone spread with 2 replicas:
+#   - maxSkew: 1
+#     topologyKey: topology.kubernetes.io/zone
+#     whenUnsatisfiable: DoNotSchedule
+#     labelSelector:
+#       matchLabels:
+#         app.kubernetes.io/name: spillway
+topologySpreadConstraints: []
+
+# -- PriorityClassName for the controller Pod.
+priorityClassName: ""
+
+metrics:
+  service:
+    # -- Create a ClusterIP Service exposing the metrics port.
+    enabled: true
+    # -- Service type.
+    type: ClusterIP
+    # -- Port on which metrics are served.
+    port: 8080
+    # -- Annotations for the metrics Service (e.g. for scrape configs).
+    annotations: {}
+  serviceMonitor:
+    # -- Create a Prometheus Operator ServiceMonitor. Requires metrics.service.enabled.
+    enabled: false
+    # -- Scrape interval.
+    interval: 30s
+    # -- Scrape timeout.
+    scrapeTimeout: 10s
+    # -- Extra labels added to the ServiceMonitor (used for Prometheus selector rules).
+    labels: {}
+    # -- Annotations added to the ServiceMonitor.
+    annotations: {}
+
+podDisruptionBudget:
+  # -- Create a PodDisruptionBudget. Recommended when replicaCount > 1.
+  enabled: false
+  # -- Minimum number of available replicas. Mutually exclusive with maxUnavailable.
+  minAvailable: 1
+  # maxUnavailable: 1
+
+networkPolicy:
+  # -- Create a NetworkPolicy allowing ingress only to the metrics and probes ports.
+  enabled: false
+  # -- Extra ingress rules added to the NetworkPolicy (e.g. to allow specific scraper pods).
+  # ingress: []
+
+# -- Create the spillway-system namespace. Set to false if the namespace already exists
+# or is managed externally.
+createNamespace: true

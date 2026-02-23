@@ -1,0 +1,38 @@
+# Binaries
+/spillway
+/bin/
+/dist/
+
+# Go build/test artifacts
+*.test
+*.out
+*.coverprofile
+coverage.out
+
+# Go workspace/cache files (local only)
+.cache/
+
+# Vendor (optional; ignore unless intentionally committed)
+/vendor/
+
+# IDE/editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Helm packaging output
+*.tgz
+
+# Env/local config
+.env
+.env.*
+
+# Test/debug artifacts
+/tmp/
+

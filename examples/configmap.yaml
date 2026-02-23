@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-settings
+  namespace: source-team
+  annotations:
+    spillway.kroy.io/replicate-to: "team-*,sandbox"
+    spillway.kroy.io/exclude-namespaces: "team-dev"
+data:
+  LOG_LEVEL: info
+  FEATURE_FLAG_X: "true"

@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Verify gofmt
+        run: |
+          files="$(find cmd internal -name '*.go' -type f | tr '\n' ' ')"
+          test -z "$(gofmt -l $files)"
+
+      - name: Run unit and smoke tests
+        run: go test ./...
+
+  helm:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+
+      - name: Helm lint
+        run: helm lint charts/spillway
+
+      - name: Helm smoke render
+        run: |
+          helm template spillway charts/spillway \
+            --namespace spillway-system \
+            --set image.tag=test \
+            --set metrics.serviceMonitor.enabled=false > /tmp/spillway-render.yaml
+          test -s /tmp/spillway-render.yaml
+

@@ -1,0 +1,20 @@
+apiVersion: v2
+name: spillway
+description: >
+  Replicates Kubernetes Secrets and ConfigMaps across namespaces in near real
+  time using annotations on the source object.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - kubernetes
+  - secrets
+  - configmaps
+  - replication
+  - controller
+home: https://github.com/kroy-the-rabbit/spillway
+sources:
+  - https://github.com/kroy-the-rabbit/spillway
+maintainers:
+  - name: kroy
+    email: kroy@kroy.io

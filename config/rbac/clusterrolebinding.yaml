@@ -1,0 +1,13 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: spillway-controller
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: spillway-controller
+subjects:
+  - kind: ServiceAccount
+    name: spillway-controller
+    namespace: spillway-system
+
