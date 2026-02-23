@@ -35,7 +35,7 @@ func (r *ConfigMapReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, err
 	}
 
-	if isManagedReplica(&src) {
+	if isManagedReplica(&src) || isSkipped(&src) {
 		return ctrl.Result{}, nil
 	}
 

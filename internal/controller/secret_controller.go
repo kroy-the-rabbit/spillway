@@ -35,7 +35,7 @@ func (r *SecretReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		return ctrl.Result{}, err
 	}
 
-	if isManagedReplica(&src) {
+	if isManagedReplica(&src) || isSkipped(&src) {
 		return ctrl.Result{}, nil
 	}
 

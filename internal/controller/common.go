@@ -24,6 +24,10 @@ const (
 	// per-object spillway.kroy.io/replicate-to annotation.
 	LabelDefaultReplicate = "spillway.kroy.io/default-replicate"
 
+	// AnnotationSkip on a Secret or ConfigMap tells spillway to leave it alone
+	// entirely, even when its namespace has a default-replicate label.
+	AnnotationSkip = "spillway.kroy.io/skip"
+
 	AnnotationManagedBy  = "spillway.kroy.io/managed-by"
 	AnnotationSourceFrom = "spillway.kroy.io/source-from"
 
@@ -164,6 +168,10 @@ func filteredAnnotations(source map[string]string) map[string]string {
 
 func isManagedReplica(obj metav1.Object) bool {
 	return obj.GetAnnotations()[AnnotationManagedBy] == ManagedByValue
+}
+
+func isSkipped(obj metav1.Object) bool {
+	return obj.GetAnnotations()[AnnotationSkip] == "true"
 }
 
 func matchesSource(obj metav1.Object, kind, namespace, name string) bool {
