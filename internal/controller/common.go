@@ -28,6 +28,12 @@ const (
 	// entirely, even when its namespace has a default-replicate label.
 	AnnotationSkip = "spillway.kroy.io/skip"
 
+	// AnnotationForceAdopt on a source Secret or ConfigMap tells spillway to
+	// overwrite pre-existing objects in target namespaces even if they were not
+	// previously managed by spillway. Use this to take ownership of objects
+	// that existed before spillway was installed.
+	AnnotationForceAdopt = "spillway.kroy.io/force-adopt"
+
 	AnnotationManagedBy  = "spillway.kroy.io/managed-by"
 	AnnotationSourceFrom = "spillway.kroy.io/source-from"
 
@@ -255,11 +261,18 @@ func nsDefaultSelector(ns corev1.Namespace) targetSelector {
 	return parseTargetSelector(ns.Labels[LabelDefaultReplicate])
 }
 
-func ensureManagedOwnership(obj metav1.Object, desc sourceDescriptor) error {
+func isForceAdopt(obj metav1.Object) bool {
+	return obj.GetAnnotations()[AnnotationForceAdopt] == "true"
+}
+
+func ensureManagedOwnership(obj metav1.Object, desc sourceDescriptor, forceAdopt bool) error {
 	if obj.GetUID() == "" {
 		return nil
 	}
 	if matchesSource(obj, desc.kind, desc.namespace, desc.name) {
+		return nil
+	}
+	if forceAdopt {
 		return nil
 	}
 	return fmt.Errorf("refusing to overwrite existing %T %s/%s that is not managed by spillway for source %s", obj, obj.GetNamespace(), obj.GetName(), desc.sourceKey())

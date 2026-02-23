@@ -96,6 +96,7 @@ func (r *ConfigMapReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 	logTargetSync(log, desc, targets)
 
+	forceAdopt := isForceAdopt(&src)
 	desired := map[string]struct{}{}
 	var errs []error
 	for _, ns := range targets {
@@ -105,7 +106,7 @@ func (r *ConfigMapReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		target.Name = src.Name
 		target.Namespace = ns
 		_, syncErr := controllerutil.CreateOrUpdate(ctx, r.Client, target, func() error {
-			if err := ensureManagedOwnership(target, desc); err != nil {
+			if err := ensureManagedOwnership(target, desc, forceAdopt); err != nil {
 				return err
 			}
 			target.Labels = copyStringMap(src.Labels)
