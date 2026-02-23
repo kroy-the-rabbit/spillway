@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
@@ -80,13 +81,14 @@ func (r *ConfigMapReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	logTargetSync(log, desc, targets)
 
 	desired := map[string]struct{}{}
+	var errs []error
 	for _, ns := range targets {
 		desired[ns] = struct{}{}
 
 		target := &corev1.ConfigMap{}
 		target.Name = src.Name
 		target.Namespace = ns
-		_, err = controllerutil.CreateOrUpdate(ctx, r.Client, target, func() error {
+		_, syncErr := controllerutil.CreateOrUpdate(ctx, r.Client, target, func() error {
 			if err := ensureManagedOwnership(target, desc); err != nil {
 				return err
 			}
@@ -97,16 +99,17 @@ func (r *ConfigMapReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			target.BinaryData = copyByteMap(src.BinaryData)
 			return nil
 		})
-		if err != nil {
-			return ctrl.Result{}, err
+		if syncErr != nil {
+			log.Error(syncErr, "failed to sync configmap to target namespace", "namespace", ns)
+			errs = append(errs, syncErr)
 		}
 	}
 
 	if err := r.cleanupReplicatedConfigMaps(ctx, desc, desired); err != nil {
-		return ctrl.Result{}, err
+		errs = append(errs, err)
 	}
 
-	return ctrl.Result{}, nil
+	return ctrl.Result{}, errors.Join(errs...)
 }
 
 func (r *ConfigMapReconciler) cleanupReplicatedConfigMaps(ctx context.Context, desc sourceDescriptor, keep map[string]struct{}) error {
