@@ -4,8 +4,8 @@ description: >
   Replicates Kubernetes Secrets and ConfigMaps across namespaces in near real
   time using annotations on the source object.
 type: application
-version: 0.2.0
-appVersion: "0.2.0"
+version: 0.2.1
+appVersion: "0.2.1"
 keywords:
   - kubernetes
   - secrets
@@ -23,6 +23,10 @@ annotations:
   artifacthub.io/displayName: Spillway
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: fixed
+      description: Add self-heal fallback requeue, indexed cleanup, and replica delete remap hardening
+    - kind: fixed
+      description: Helm reuse-values upgrades now default selfHealInterval safely
     - kind: added
       description: Label-selector namespace targeting (replicate-to-matching)
     - kind: added
