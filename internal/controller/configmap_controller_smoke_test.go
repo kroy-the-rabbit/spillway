@@ -7,11 +7,11 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
-	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
@@ -156,5 +156,15 @@ func newCMSmokeClient(t *testing.T, objs ...client.Object) (client.Client, *runt
 	if err := corev1.AddToScheme(scheme); err != nil {
 		t.Fatalf("add corev1 to scheme: %v", err)
 	}
-	return fake.NewClientBuilder().WithScheme(scheme).WithObjects(objs...).Build(), scheme
+	return fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithIndex(&corev1.ConfigMap{}, configMapReplicaSourceFieldIdx, func(obj client.Object) []string {
+			cm, ok := obj.(*corev1.ConfigMap)
+			if !ok {
+				return nil
+			}
+			return replicaSourceFieldIndexValue(cm)
+		}).
+		WithObjects(objs...).
+		Build(), scheme
 }

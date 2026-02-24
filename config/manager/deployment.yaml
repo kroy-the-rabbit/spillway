@@ -33,6 +33,7 @@ spec:
             - --metrics-bind-address=:8080
             - --health-probe-bind-address=:8081
             - --sync-period=5m
+            - --self-heal-interval=45s
           ports:
             - name: metrics
               containerPort: 8080

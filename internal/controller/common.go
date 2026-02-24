@@ -12,14 +12,20 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/workqueue"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
 const (
-	AnnotationReplicateTo        = "spillway.kroy.io/replicate-to"
+	AnnotationReplicateTo         = "spillway.kroy.io/replicate-to"
 	AnnotationReplicateToMatching = "spillway.kroy.io/replicate-to-matching"
-	AnnotationExcludeNS          = "spillway.kroy.io/exclude-namespaces"
+	AnnotationExcludeNS           = "spillway.kroy.io/exclude-namespaces"
 
 	// AnnotationForceAdopt on a source Secret or ConfigMap tells spillway to
 	// overwrite pre-existing objects in target namespaces even if they were not
@@ -36,6 +42,9 @@ const (
 
 	ManagedByValue = "spillway"
 	FinalizerName  = "spillway.kroy.io/finalizer"
+
+	secretReplicaSourceFieldIdx    = "spillway.kroy.io/index.secret-source-from"
+	configMapReplicaSourceFieldIdx = "spillway.kroy.io/index.configmap-source-from"
 )
 
 var defaultProtectedNamespaces = map[string]struct{}{
@@ -252,6 +261,128 @@ func parseSourceFrom(kind, raw string) (namespace, name string, ok bool) {
 
 func logTargetSync(log logr.Logger, desc sourceDescriptor, targets []string) {
 	log.Info("reconciling replication targets", "source", desc.sourceKey(), "targets", targets)
+}
+
+func sourceRequestsFromManagedReplica(log logr.Logger, obj client.Object, kind, eventName string) []reconcile.Request {
+	if obj == nil {
+		log.V(1).Info("replica remap failed: nil object", "kind", kind, "event", eventName)
+		ReplicaRemapFailuresTotal.WithLabelValues(kind, "nil_object").Inc()
+		return nil
+	}
+
+	ann := obj.GetAnnotations()
+	if ann[AnnotationManagedBy] != ManagedByValue {
+		return nil
+	}
+
+	ns, name, ok := parseSourceFrom(kind, ann[AnnotationSourceFrom])
+	if !ok {
+		log.V(1).Info(
+			"replica remap failed: malformed source annotation",
+			"kind", kind,
+			"event", eventName,
+			"namespace", obj.GetNamespace(),
+			"name", obj.GetName(),
+			"annotation", ann[AnnotationSourceFrom],
+		)
+		ReplicaRemapFailuresTotal.WithLabelValues(kind, "malformed_source_from").Inc()
+		return nil
+	}
+
+	return []reconcile.Request{{NamespacedName: types.NamespacedName{Namespace: ns, Name: name}}}
+}
+
+func enqueueReplicaDeleteSourceRemap(
+	ctx context.Context,
+	log logr.Logger,
+	q workqueue.RateLimitingInterface,
+	kind string,
+	evt event.TypedDeleteEvent[client.Object],
+) {
+	reqs := sourceRequestsFromManagedReplica(log, evt.Object, kind, "delete")
+	if len(reqs) == 0 {
+		return
+	}
+	for _, req := range reqs {
+		q.Add(req)
+	}
+	if evt.DeleteStateUnknown {
+		log.V(1).Info("replica delete remapped from tombstone", "kind", kind, "requests", len(reqs))
+	}
+	_ = ctx
+}
+
+func sourceObjectPredicate() predicate.Predicate {
+	return predicate.Funcs{
+		CreateFunc: func(e event.CreateEvent) bool {
+			return e.Object != nil && !isManagedReplica(e.Object)
+		},
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			return e.ObjectNew != nil && !isManagedReplica(e.ObjectNew)
+		},
+		DeleteFunc: func(e event.DeleteEvent) bool {
+			return e.Object != nil && !isManagedReplica(e.Object)
+		},
+		GenericFunc: func(e event.GenericEvent) bool {
+			return e.Object != nil && !isManagedReplica(e.Object)
+		},
+	}
+}
+
+func managedReplicaDeleteOnlyPredicate() predicate.Predicate {
+	return predicate.Funcs{
+		CreateFunc: func(event.CreateEvent) bool { return false },
+		UpdateFunc: func(event.UpdateEvent) bool { return false },
+		DeleteFunc: func(e event.DeleteEvent) bool {
+			return e.Object != nil && isManagedReplica(e.Object)
+		},
+		GenericFunc: func(event.GenericEvent) bool { return false },
+	}
+}
+
+func replicaSourceFieldIndexValue(obj metav1.Object) []string {
+	if obj == nil {
+		return nil
+	}
+	if obj.GetAnnotations()[AnnotationManagedBy] != ManagedByValue {
+		return nil
+	}
+	v := obj.GetAnnotations()[AnnotationSourceFrom]
+	if v == "" {
+		return nil
+	}
+	return []string{v}
+}
+
+func registerSecretReplicaIndex(ctx context.Context, mgr ctrl.Manager) error {
+	return mgr.GetFieldIndexer().IndexField(ctx, &corev1.Secret{}, secretReplicaSourceFieldIdx, func(obj client.Object) []string {
+		secret, ok := obj.(*corev1.Secret)
+		if !ok {
+			return nil
+		}
+		return replicaSourceFieldIndexValue(secret)
+	})
+}
+
+func registerConfigMapReplicaIndex(ctx context.Context, mgr ctrl.Manager) error {
+	return mgr.GetFieldIndexer().IndexField(ctx, &corev1.ConfigMap{}, configMapReplicaSourceFieldIdx, func(obj client.Object) []string {
+		cm, ok := obj.(*corev1.ConfigMap)
+		if !ok {
+			return nil
+		}
+		return replicaSourceFieldIndexValue(cm)
+	})
+}
+
+func reconcileActionFromOperationResult(op controllerutil.OperationResult) string {
+	switch op {
+	case controllerutil.OperationResultCreated:
+		return "create"
+	case controllerutil.OperationResultUpdated, controllerutil.OperationResultUpdatedStatus, controllerutil.OperationResultUpdatedStatusOnly:
+		return "update"
+	default:
+		return ""
+	}
 }
 
 func ptrBool(in *bool) *bool {

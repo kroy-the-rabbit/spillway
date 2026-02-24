@@ -4,16 +4,19 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 )
 
@@ -22,6 +25,8 @@ type SecretReconciler struct {
 	Scheme   *runtime.Scheme
 	Log      logr.Logger
 	Recorder record.EventRecorder
+	// SelfHealInterval requeues active source objects to recover from missed watch events.
+	SelfHealInterval time.Duration
 }
 
 func (r *SecretReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -53,7 +58,7 @@ func (r *SecretReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 
 	if !src.DeletionTimestamp.IsZero() {
 		if controllerutil.ContainsFinalizer(&src, FinalizerName) {
-			if err := r.cleanupReplicatedSecrets(ctx, desc, nil); err != nil {
+			if _, err := r.cleanupReplicatedSecrets(ctx, desc, nil); err != nil {
 				return ctrl.Result{}, err
 			}
 			removeFinalizer(&src)
@@ -66,7 +71,7 @@ func (r *SecretReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 
 	if selector.empty() && matchingSel == nil {
 		if controllerutil.ContainsFinalizer(&src, FinalizerName) {
-			if err := r.cleanupReplicatedSecrets(ctx, desc, nil); err != nil {
+			if _, err := r.cleanupReplicatedSecrets(ctx, desc, nil); err != nil {
 				return ctrl.Result{}, err
 			}
 			removeFinalizer(&src)
@@ -91,6 +96,7 @@ func (r *SecretReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 
 	forceAdopt := isForceAdopt(&src)
 	desired := map[string]struct{}{}
+	changedCount := 0
 	var errs []error
 	for _, ns := range targets {
 		desired[ns] = struct{}{}
@@ -98,7 +104,7 @@ func (r *SecretReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		target := &corev1.Secret{}
 		target.Name = src.Name
 		target.Namespace = ns
-		_, syncErr := controllerutil.CreateOrUpdate(ctx, r.Client, target, func() error {
+		op, syncErr := controllerutil.CreateOrUpdate(ctx, r.Client, target, func() error {
 			if err := ensureManagedOwnership(target, desc, forceAdopt); err != nil {
 				return err
 			}
@@ -116,18 +122,30 @@ func (r *SecretReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		if syncErr != nil {
 			log.Error(syncErr, "failed to sync secret to target namespace", "namespace", ns)
 			errs = append(errs, syncErr)
+			continue
+		}
+		if op != controllerutil.OperationResultNone {
+			changedCount++
+			if action := reconcileActionFromOperationResult(op); action != "" {
+				ReconcileChangesTotal.WithLabelValues("Secret", action).Inc()
+			}
 		}
 	}
 
-	if err := r.cleanupReplicatedSecrets(ctx, desc, desired); err != nil {
+	deletedCount, err := r.cleanupReplicatedSecrets(ctx, desc, desired)
+	if err != nil {
 		errs = append(errs, err)
+	} else {
+		changedCount += deletedCount
 	}
 
 	if r.Recorder != nil {
 		if len(errs) == 0 {
-			r.Recorder.Eventf(&src, corev1.EventTypeNormal, "ReplicationSucceeded",
-				"Replicated to %d namespace(s)", len(targets))
-			ReplicationsTotal.WithLabelValues("Secret", "success").Add(float64(len(targets)))
+			if changedCount > 0 {
+				r.Recorder.Eventf(&src, corev1.EventTypeNormal, "ReplicationSucceeded",
+					"Applied %d change(s) across %d target namespace(s)", changedCount, len(targets))
+				ReplicationsTotal.WithLabelValues("Secret", "success").Add(float64(changedCount))
+			}
 		} else {
 			r.Recorder.Eventf(&src, corev1.EventTypeWarning, "ReplicationFailed",
 				"Failed to replicate to %d/%d namespace(s)", len(errs), len(targets))
@@ -135,15 +153,25 @@ func (r *SecretReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		}
 	}
 
-	return ctrl.Result{}, errors.Join(errs...)
+	result := ctrl.Result{}
+	if len(errs) == 0 && r.SelfHealInterval > 0 {
+		result.RequeueAfter = r.SelfHealInterval
+	}
+	return result, errors.Join(errs...)
 }
 
-func (r *SecretReconciler) cleanupReplicatedSecrets(ctx context.Context, desc sourceDescriptor, keep map[string]struct{}) error {
+func (r *SecretReconciler) cleanupReplicatedSecrets(ctx context.Context, desc sourceDescriptor, keep map[string]struct{}) (int, error) {
 	var all corev1.SecretList
-	if err := r.List(ctx, &all, client.MatchingLabels{LabelManagedBy: ManagedByValue}); err != nil {
-		return err
+	if err := r.List(
+		ctx,
+		&all,
+		client.MatchingLabels{LabelManagedBy: ManagedByValue},
+		client.MatchingFields{secretReplicaSourceFieldIdx: desc.sourceFrom()},
+	); err != nil {
+		return 0, err
 	}
 
+	deleted := 0
 	for i := range all.Items {
 		s := &all.Items[i]
 		if !matchesSource(s, desc.kind, desc.namespace, desc.name) {
@@ -155,28 +183,32 @@ func (r *SecretReconciler) cleanupReplicatedSecrets(ctx context.Context, desc so
 			}
 		}
 		if err := safeDelete(ctx, r.Client, s); err != nil {
-			return err
+			return deleted, err
 		}
+		deleted++
 	}
-	return nil
+	if deleted > 0 {
+		CleanupDeletesTotal.WithLabelValues("Secret").Add(float64(deleted))
+		ReconcileChangesTotal.WithLabelValues("Secret", "delete").Add(float64(deleted))
+	}
+	return deleted, nil
 }
 
 func (r *SecretReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	if err := registerSecretReplicaIndex(context.Background(), mgr); err != nil {
+		return err
+	}
+
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&corev1.Secret{}).
+		For(&corev1.Secret{}, builder.WithPredicates(sourceObjectPredicate())).
 		Watches(
 			&corev1.Secret{},
-			handler.EnqueueRequestsFromMapFunc(func(_ context.Context, obj client.Object) []ctrl.Request {
-				ann := obj.GetAnnotations()
-				if ann[AnnotationManagedBy] != ManagedByValue {
-					return nil
-				}
-				ns, name, ok := parseSourceFrom("Secret", ann[AnnotationSourceFrom])
-				if !ok {
-					return nil
-				}
-				return []ctrl.Request{{NamespacedName: types.NamespacedName{Namespace: ns, Name: name}}}
-			}),
+			handler.Funcs{
+				DeleteFunc: func(ctx context.Context, evt event.DeleteEvent, q workqueue.RateLimitingInterface) {
+					enqueueReplicaDeleteSourceRemap(ctx, r.Log, q, "Secret", evt)
+				},
+			},
+			builder.WithPredicates(managedReplicaDeleteOnlyPredicate()),
 		).
 		Complete(r)
 }

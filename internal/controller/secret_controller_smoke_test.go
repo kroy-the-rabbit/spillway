@@ -252,5 +252,15 @@ func newSecretSmokeClient(t *testing.T, objs ...client.Object) (client.Client, *
 	if err := corev1.AddToScheme(scheme); err != nil {
 		t.Fatalf("add corev1 to scheme: %v", err)
 	}
-	return fake.NewClientBuilder().WithScheme(scheme).WithObjects(objs...).Build(), scheme
+	return fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithIndex(&corev1.Secret{}, secretReplicaSourceFieldIdx, func(obj client.Object) []string {
+			secret, ok := obj.(*corev1.Secret)
+			if !ok {
+				return nil
+			}
+			return replicaSourceFieldIndexValue(secret)
+		}).
+		WithObjects(objs...).
+		Build(), scheme
 }

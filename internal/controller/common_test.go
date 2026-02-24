@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -205,6 +206,43 @@ func TestSourceFromValue(t *testing.T) {
 	got := sourceFromValue("Secret", "platform", "api-token")
 	if got != "Secret/platform/api-token" {
 		t.Fatalf("unexpected source-from value: %q", got)
+	}
+}
+
+func TestSourceRequestsFromManagedReplica(t *testing.T) {
+	reqs := sourceRequestsFromManagedReplica(logr.Discard(), &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "copy",
+			Namespace: "team-a",
+			Annotations: map[string]string{
+				AnnotationManagedBy:  ManagedByValue,
+				AnnotationSourceFrom: "Secret/platform/shared-token",
+			},
+		},
+	}, "Secret", "test")
+
+	if len(reqs) != 1 {
+		t.Fatalf("expected 1 request, got %d", len(reqs))
+	}
+	if reqs[0].Namespace != "platform" || reqs[0].Name != "shared-token" {
+		t.Fatalf("unexpected request: %+v", reqs[0].NamespacedName)
+	}
+}
+
+func TestSourceRequestsFromManagedReplica_NilOrMalformed(t *testing.T) {
+	if reqs := sourceRequestsFromManagedReplica(logr.Discard(), nil, "Secret", "test"); len(reqs) != 0 {
+		t.Fatalf("expected no requests for nil object, got %d", len(reqs))
+	}
+
+	if reqs := sourceRequestsFromManagedReplica(logr.Discard(), &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Annotations: map[string]string{
+				AnnotationManagedBy:  ManagedByValue,
+				AnnotationSourceFrom: "bad-format",
+			},
+		},
+	}, "Secret", "test"); len(reqs) != 0 {
+		t.Fatalf("expected no requests for malformed source annotation, got %d", len(reqs))
 	}
 }
 

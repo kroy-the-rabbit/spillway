@@ -54,6 +54,8 @@ controller:
   leaderElect: true
   # -- Periodic full resync interval. Parsed by Go's time.ParseDuration.
   syncPeriod: 5m
+  # -- Per-object self-heal fallback requeue interval. Set to 0 to disable.
+  selfHealInterval: 45s
   # -- Address for the Prometheus metrics endpoint.
   metricsBindAddress: ":8080"
   # -- Address for the health and readiness probe endpoints.

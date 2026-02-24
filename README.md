@@ -168,13 +168,14 @@ serviceAccount:
 |-----|---------|-------------|
 | `image.repository` | `ghcr.io/kroy-the-rabbit/spillway` | Image repository |
 | `image.tag` | chart `appVersion` | Image tag |
-| `replicaCount` | `1` | Number of controller replicas |
+| `replicaCount` | `2` | Number of controller replicas |
 | `controller.leaderElect` | `true` | Enable leader election |
 | `controller.syncPeriod` | `5m` | Full resync interval |
+| `controller.selfHealInterval` | `45s` | Per-object fallback requeue interval (`0` disables) |
 | `resources` | see values.yaml | CPU/memory requests and limits |
-| `podDisruptionBudget.enabled` | `false` | Create a PodDisruptionBudget |
+| `podDisruptionBudget.enabled` | `true` | Create a PodDisruptionBudget |
 | `metrics.serviceMonitor.enabled` | `false` | Create a Prometheus ServiceMonitor |
-| `networkPolicy.enabled` | `false` | Restrict ingress via NetworkPolicy |
+| `networkPolicy.enabled` | `true` | Restrict ingress via NetworkPolicy |
 | `createNamespace` | `true` | Create the release namespace |
 
 Full defaults are documented in [`charts/spillway/values.yaml`](charts/spillway/values.yaml).
