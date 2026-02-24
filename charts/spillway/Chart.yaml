@@ -4,8 +4,8 @@ description: >
   Replicates Kubernetes Secrets and ConfigMaps across namespaces in near real
   time using annotations on the source object.
 type: application
-version: 0.2.1
-appVersion: "0.2.1"
+version: 0.2.2
+appVersion: "0.2.2"
 keywords:
   - kubernetes
   - secrets
@@ -33,7 +33,7 @@ annotations:
       description: Kubernetes Events on replication success and failure
     - kind: added
       description: Custom Prometheus metric spillway_replications_total
-    - kind: security-fix
+    - kind: security
       description: Cleanup now filters by managed-by label (was unbounded List)
   artifacthub.io/maintainers: |
     - name: kroy
