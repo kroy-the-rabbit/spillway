@@ -11,13 +11,15 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
 const (
-	AnnotationReplicateTo = "spillway.kroy.io/replicate-to"
-	AnnotationExcludeNS   = "spillway.kroy.io/exclude-namespaces"
+	AnnotationReplicateTo        = "spillway.kroy.io/replicate-to"
+	AnnotationReplicateToMatching = "spillway.kroy.io/replicate-to-matching"
+	AnnotationExcludeNS          = "spillway.kroy.io/exclude-namespaces"
 
 	// AnnotationForceAdopt on a source Secret or ConfigMap tells spillway to
 	// overwrite pre-existing objects in target namespaces even if they were not
@@ -27,6 +29,10 @@ const (
 
 	AnnotationManagedBy  = "spillway.kroy.io/managed-by"
 	AnnotationSourceFrom = "spillway.kroy.io/source-from"
+
+	// LabelManagedBy is the same key as AnnotationManagedBy, set as a label
+	// on replica objects so cleanup can use a label-filtered List.
+	LabelManagedBy = "spillway.kroy.io/managed-by"
 
 	ManagedByValue = "spillway"
 	FinalizerName  = "spillway.kroy.io/finalizer"
@@ -92,9 +98,10 @@ func resolveTargetNamespaces(
 	c client.Client,
 	include targetSelector,
 	exclude targetSelector,
+	matchingSel labels.Selector,
 	sourceNamespace string,
 ) ([]string, error) {
-	if include.empty() {
+	if include.empty() && matchingSel == nil {
 		return nil, nil
 	}
 
@@ -105,20 +112,26 @@ func resolveTargetNamespaces(
 
 	out := make([]string, 0, len(nsList.Items))
 	for i := range nsList.Items {
-		ns := nsList.Items[i].Name
-		if ns == sourceNamespace {
+		ns := &nsList.Items[i]
+		nsName := ns.Name
+		if nsName == sourceNamespace {
 			continue
 		}
-		if !include.matchesNamespace(ns) {
+
+		nameMatch := include.matchesNamespace(nsName)
+		labelMatch := matchingSel != nil && matchingSel.Matches(labels.Set(ns.Labels))
+		if !nameMatch && !labelMatch {
 			continue
 		}
-		if _, protected := defaultProtectedNamespaces[ns]; protected && !include.hasExact(ns) {
+
+		// kube-system protection: bypassed by explicit exact name OR label match
+		if _, protected := defaultProtectedNamespaces[nsName]; protected && !include.hasExact(nsName) && !labelMatch {
 			continue
 		}
-		if exclude.matchesNamespace(ns) {
+		if exclude.matchesNamespace(nsName) {
 			continue
 		}
-		out = append(out, ns)
+		out = append(out, nsName)
 	}
 	sort.Strings(out)
 	return out, nil
@@ -221,6 +234,22 @@ func sourceFromValue(kind, namespace, name string) string {
 	return fmt.Sprintf("%s/%s/%s", kind, namespace, name)
 }
 
+// parseSourceFrom extracts (namespace, name) from a AnnotationSourceFrom value
+// of the form "Kind/namespace/name". Returns ok=false if the value doesn't
+// match the expected kind or is malformed.
+func parseSourceFrom(kind, raw string) (namespace, name string, ok bool) {
+	prefix := kind + "/"
+	if !strings.HasPrefix(raw, prefix) {
+		return "", "", false
+	}
+	rest := raw[len(prefix):]
+	idx := strings.IndexByte(rest, '/')
+	if idx <= 0 || idx == len(rest)-1 {
+		return "", "", false
+	}
+	return rest[:idx], rest[idx+1:], true
+}
+
 func logTargetSync(log logr.Logger, desc sourceDescriptor, targets []string) {
 	log.Info("reconciling replication targets", "source", desc.sourceKey(), "targets", targets)
 }
@@ -235,6 +264,14 @@ func ptrBool(in *bool) *bool {
 
 func listTargetSelector(obj metav1.Object) targetSelector {
 	return parseTargetSelector(obj.GetAnnotations()[AnnotationReplicateTo])
+}
+
+func listMatchingSelector(obj metav1.Object) (labels.Selector, error) {
+	raw := obj.GetAnnotations()[AnnotationReplicateToMatching]
+	if raw == "" {
+		return nil, nil
+	}
+	return labels.Parse(raw)
 }
 
 func listExcludeSelector(obj metav1.Object) targetSelector {

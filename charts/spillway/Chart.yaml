@@ -4,8 +4,8 @@ description: >
   Replicates Kubernetes Secrets and ConfigMaps across namespaces in near real
   time using annotations on the source object.
 type: application
-version: 0.1.5
-appVersion: "0.1.5"
+version: 0.2.0
+appVersion: "0.2.0"
 keywords:
   - kubernetes
   - secrets
@@ -18,3 +18,19 @@ sources:
 maintainers:
   - name: kroy
     email: kroy@kroy.io
+annotations:
+  artifacthub.io/category: security
+  artifacthub.io/displayName: Spillway
+  artifacthub.io/license: Apache-2.0
+  artifacthub.io/changes: |
+    - kind: added
+      description: Label-selector namespace targeting (replicate-to-matching)
+    - kind: added
+      description: Kubernetes Events on replication success and failure
+    - kind: added
+      description: Custom Prometheus metric spillway_replications_total
+    - kind: security-fix
+      description: Cleanup now filters by managed-by label (was unbounded List)
+  artifacthub.io/maintainers: |
+    - name: kroy
+      email: kroy@kroy.io

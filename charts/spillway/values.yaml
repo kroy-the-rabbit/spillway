@@ -145,7 +145,7 @@ podDisruptionBudget:
 
 networkPolicy:
   # -- Create a NetworkPolicy allowing ingress only to the metrics and probes ports.
-  enabled: false
+  enabled: true
   # -- Extra ingress rules added to the NetworkPolicy (e.g. to allow specific scraper pods).
   # ingress: []
 
