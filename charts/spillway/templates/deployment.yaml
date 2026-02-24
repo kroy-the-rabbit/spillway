@@ -42,7 +42,7 @@ spec:
             - --metrics-bind-address={{ .Values.controller.metricsBindAddress }}
             - --health-probe-bind-address={{ .Values.controller.healthProbeBindAddress }}
             - --sync-period={{ .Values.controller.syncPeriod }}
-            - --self-heal-interval={{ .Values.controller.selfHealInterval }}
+            - --self-heal-interval={{ default "45s" .Values.controller.selfHealInterval }}
           ports:
             - name: metrics
               containerPort: 8080
