@@ -1,5 +1,7 @@
 # spillway
 
+[![Artifact Hub](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/spillway)](https://artifacthub.io/packages/search?repo=spillway)
+
 `spillway` replicates Kubernetes `Secrets` and `ConfigMaps` to other namespaces in near real time using annotations on the source object.
 
 ## How it works
