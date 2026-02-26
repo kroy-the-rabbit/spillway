@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path"
 	"sort"
@@ -144,6 +145,35 @@ func resolveTargetNamespaces(
 	}
 	sort.Strings(out)
 	return out, nil
+}
+
+func namespaceMatchesTargeting(
+	ns *corev1.Namespace,
+	include targetSelector,
+	exclude targetSelector,
+	matchingSel labels.Selector,
+	sourceNamespace string,
+) bool {
+	if ns == nil {
+		return false
+	}
+	nsName := ns.Name
+	if nsName == sourceNamespace {
+		return false
+	}
+
+	nameMatch := include.matchesNamespace(nsName)
+	labelMatch := matchingSel != nil && matchingSel.Matches(labels.Set(ns.Labels))
+	if !nameMatch && !labelMatch {
+		return false
+	}
+	if _, protected := defaultProtectedNamespaces[nsName]; protected && !include.hasExact(nsName) && !labelMatch {
+		return false
+	}
+	if exclude.matchesNamespace(nsName) {
+		return false
+	}
+	return true
 }
 
 func copyStringMap(in map[string]string) map[string]string {
@@ -340,6 +370,50 @@ func managedReplicaDeleteOnlyPredicate() predicate.Predicate {
 	}
 }
 
+func namespaceEventPredicate() predicate.Predicate {
+	return predicate.Funcs{
+		CreateFunc: func(e event.CreateEvent) bool {
+			_, ok := e.Object.(*corev1.Namespace)
+			return ok
+		},
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			oldNS, okOld := e.ObjectOld.(*corev1.Namespace)
+			newNS, okNew := e.ObjectNew.(*corev1.Namespace)
+			if !okOld || !okNew {
+				return false
+			}
+			return !mapsEqual(oldNS.Labels, newNS.Labels)
+		},
+		DeleteFunc:  func(event.DeleteEvent) bool { return false },
+		GenericFunc: func(event.GenericEvent) bool { return false },
+	}
+}
+
+func mapsEqual(a, b map[string]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if b[k] != v {
+			return false
+		}
+	}
+	return true
+}
+
+func namespaceChangeAffectsSource(obj metav1.Object, ns *corev1.Namespace) (bool, error) {
+	include := listTargetSelector(obj)
+	exclude := listExcludeSelector(obj)
+	matchingSel, err := listMatchingSelector(obj)
+	if err != nil {
+		return false, err
+	}
+	if include.empty() && matchingSel == nil {
+		return false, nil
+	}
+	return namespaceMatchesTargeting(ns, include, exclude, matchingSel, obj.GetNamespace()), nil
+}
+
 func replicaSourceFieldIndexValue(obj metav1.Object) []string {
 	if obj == nil {
 		return nil
@@ -423,5 +497,29 @@ func ensureManagedOwnership(obj metav1.Object, desc sourceDescriptor, forceAdopt
 	if forceAdopt {
 		return nil
 	}
-	return fmt.Errorf("refusing to overwrite existing %T %s/%s that is not managed by spillway for source %s", obj, obj.GetNamespace(), obj.GetName(), desc.sourceKey())
+	return ownershipConflictError{
+		objType:   fmt.Sprintf("%T", obj),
+		namespace: obj.GetNamespace(),
+		name:      obj.GetName(),
+		sourceKey: desc.sourceKey(),
+	}
+}
+
+type ownershipConflictError struct {
+	objType   string
+	namespace string
+	name      string
+	sourceKey string
+}
+
+func (e ownershipConflictError) Error() string {
+	return fmt.Sprintf(
+		"refusing to overwrite existing %s %s/%s that is not managed by spillway for source %s",
+		e.objType, e.namespace, e.name, e.sourceKey,
+	)
+}
+
+func isOwnershipConflict(err error) bool {
+	var target ownershipConflictError
+	return errors.As(err, &target)
 }

@@ -4,8 +4,8 @@ description: >
   Replicates Kubernetes Secrets and ConfigMaps across namespaces in near real
   time using annotations on the source object.
 type: application
-version: 0.2.2
-appVersion: "0.2.2"
+version: 0.2.3
+appVersion: "0.2.3"
 keywords:
   - kubernetes
   - secrets
@@ -23,6 +23,10 @@ annotations:
   artifacthub.io/displayName: Spillway
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: added
+      description: Namespace watches now trigger immediate reconcile on namespace create and label changes
+    - kind: fixed
+      description: Pre-existing unmanaged target objects are reported as informational skips instead of warnings
     - kind: fixed
       description: Add self-heal fallback requeue, indexed cleanup, and replica delete remap hardening
     - kind: fixed

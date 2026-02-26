@@ -97,6 +97,7 @@ func (r *ConfigMapReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	forceAdopt := isForceAdopt(&src)
 	desired := map[string]struct{}{}
 	changedCount := 0
+	skippedConflicts := 0
 	var errs []error
 	for _, ns := range targets {
 		desired[ns] = struct{}{}
@@ -120,8 +121,13 @@ func (r *ConfigMapReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			return nil
 		})
 		if syncErr != nil {
-			log.Error(syncErr, "failed to sync configmap to target namespace", "namespace", ns)
-			errs = append(errs, syncErr)
+			if isOwnershipConflict(syncErr) {
+				log.Info("skipping configmap sync to target namespace", "namespace", ns, "reason", syncErr.Error())
+				skippedConflicts++
+			} else {
+				log.Error(syncErr, "failed to sync configmap to target namespace", "namespace", ns)
+				errs = append(errs, syncErr)
+			}
 			continue
 		}
 		if op != controllerutil.OperationResultNone {
@@ -146,10 +152,18 @@ func (r *ConfigMapReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 					"Applied %d change(s) across %d target namespace(s)", changedCount, len(targets))
 				ReplicationsTotal.WithLabelValues("ConfigMap", "success").Add(float64(changedCount))
 			}
+			if skippedConflicts > 0 {
+				r.Recorder.Eventf(&src, corev1.EventTypeNormal, "ReplicationSkipped",
+					"Skipped %d target namespace(s) with pre-existing unmanaged objects", skippedConflicts)
+			}
 		} else {
 			r.Recorder.Eventf(&src, corev1.EventTypeWarning, "ReplicationFailed",
 				"Failed to replicate to %d/%d namespace(s)", len(errs), len(targets))
 			ReplicationsTotal.WithLabelValues("ConfigMap", "error").Add(float64(len(errs)))
+			if skippedConflicts > 0 {
+				r.Recorder.Eventf(&src, corev1.EventTypeNormal, "ReplicationSkipped",
+					"Skipped %d target namespace(s) with pre-existing unmanaged objects", skippedConflicts)
+			}
 		}
 	}
 
@@ -194,6 +208,37 @@ func (r *ConfigMapReconciler) cleanupReplicatedConfigMaps(ctx context.Context, d
 	return deleted, nil
 }
 
+func (r *ConfigMapReconciler) sourceRequestsForNamespace(ctx context.Context, obj client.Object) []ctrl.Request {
+	ns, ok := obj.(*corev1.Namespace)
+	if !ok || ns == nil {
+		return nil
+	}
+
+	var all corev1.ConfigMapList
+	if err := r.List(ctx, &all); err != nil {
+		r.Log.Error(err, "failed to list configmaps for namespace event fan-out", "namespace", ns.Name)
+		return nil
+	}
+
+	reqs := make([]ctrl.Request, 0)
+	for i := range all.Items {
+		src := &all.Items[i]
+		if isManagedReplica(src) {
+			continue
+		}
+		match, err := namespaceChangeAffectsSource(src, ns)
+		if err != nil {
+			r.Log.V(1).Info("skipping namespace fan-out for configmap due to invalid selector", "configmap", client.ObjectKeyFromObject(src).String(), "error", err.Error())
+			continue
+		}
+		if !match {
+			continue
+		}
+		reqs = append(reqs, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(src)})
+	}
+	return reqs
+}
+
 func (r *ConfigMapReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	if err := registerConfigMapReplicaIndex(context.Background(), mgr); err != nil {
 		return err
@@ -209,6 +254,11 @@ func (r *ConfigMapReconciler) SetupWithManager(mgr ctrl.Manager) error {
 				},
 			},
 			builder.WithPredicates(managedReplicaDeleteOnlyPredicate()),
+		).
+		Watches(
+			&corev1.Namespace{},
+			handler.EnqueueRequestsFromMapFunc(r.sourceRequestsForNamespace),
+			builder.WithPredicates(namespaceEventPredicate()),
 		).
 		Complete(r)
 }

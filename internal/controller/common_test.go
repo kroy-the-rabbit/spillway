@@ -246,6 +246,146 @@ func TestSourceRequestsFromManagedReplica_NilOrMalformed(t *testing.T) {
 	}
 }
 
+func TestNamespaceChangeAffectsSource_NameSelector(t *testing.T) {
+	src := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "shared",
+			Namespace: "platform",
+			Annotations: map[string]string{
+				AnnotationReplicateTo: "team-*",
+			},
+		},
+	}
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "team-a"}}
+
+	got, err := namespaceChangeAffectsSource(src, ns)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !got {
+		t.Fatal("expected namespace change to affect source")
+	}
+}
+
+func TestNamespaceChangeAffectsSource_LabelSelectorAndExclude(t *testing.T) {
+	src := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "shared-config",
+			Namespace: "platform",
+			Annotations: map[string]string{
+				AnnotationReplicateToMatching: "team=platform",
+				AnnotationExcludeNS:           "team-b",
+			},
+		},
+	}
+
+	matchNS := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   "team-a",
+			Labels: map[string]string{"team": "platform"},
+		},
+	}
+	excludedNS := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   "team-b",
+			Labels: map[string]string{"team": "platform"},
+		},
+	}
+
+	got, err := namespaceChangeAffectsSource(src, matchNS)
+	if err != nil {
+		t.Fatalf("unexpected error for match namespace: %v", err)
+	}
+	if !got {
+		t.Fatal("expected label-matching namespace to affect source")
+	}
+
+	got, err = namespaceChangeAffectsSource(src, excludedNS)
+	if err != nil {
+		t.Fatalf("unexpected error for excluded namespace: %v", err)
+	}
+	if got {
+		t.Fatal("expected excluded namespace to not affect source")
+	}
+}
+
+func TestNamespaceChangeAffectsSource_ProtectedNamespaceRequiresExplicitOrLabelMatch(t *testing.T) {
+	srcWildcard := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "shared",
+			Namespace: "platform",
+			Annotations: map[string]string{
+				AnnotationReplicateTo: "kube-*",
+			},
+		},
+	}
+	srcExplicit := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "shared",
+			Namespace: "platform",
+			Annotations: map[string]string{
+				AnnotationReplicateTo: "kube-*,kube-system",
+			},
+		},
+	}
+	srcLabel := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "shared",
+			Namespace: "platform",
+			Annotations: map[string]string{
+				AnnotationReplicateToMatching: "spillway-target=yes",
+			},
+		},
+	}
+	kubeSystem := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   "kube-system",
+			Labels: map[string]string{"spillway-target": "yes"},
+		},
+	}
+
+	got, err := namespaceChangeAffectsSource(srcWildcard, kubeSystem)
+	if err != nil {
+		t.Fatalf("unexpected error for wildcard source: %v", err)
+	}
+	if got {
+		t.Fatal("expected kube-system to be protected from wildcard-only targeting")
+	}
+
+	got, err = namespaceChangeAffectsSource(srcExplicit, kubeSystem)
+	if err != nil {
+		t.Fatalf("unexpected error for explicit source: %v", err)
+	}
+	if !got {
+		t.Fatal("expected explicit kube-system targeting to bypass protection")
+	}
+
+	got, err = namespaceChangeAffectsSource(srcLabel, kubeSystem)
+	if err != nil {
+		t.Fatalf("unexpected error for label source: %v", err)
+	}
+	if !got {
+		t.Fatal("expected label match to bypass kube-system protection")
+	}
+}
+
+func TestNamespaceChangeAffectsSource_InvalidSelectorReturnsError(t *testing.T) {
+	src := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "shared",
+			Namespace: "platform",
+			Annotations: map[string]string{
+				AnnotationReplicateToMatching: "!!!invalid!!!",
+			},
+		},
+	}
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "team-a"}}
+
+	if _, err := namespaceChangeAffectsSource(src, ns); err == nil {
+		t.Fatal("expected invalid selector error, got nil")
+	}
+}
+
 func objectMeta(name string) metav1.ObjectMeta {
 	return metav1.ObjectMeta{Name: name}
 }
