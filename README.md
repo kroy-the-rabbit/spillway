@@ -89,7 +89,7 @@ helm upgrade spillway oci://ghcr.io/kroy-the-rabbit/charts/spillway \
 ```bash
 # Pick a released app image tag from:
 # https://github.com/kroy-the-rabbit/spillway/releases
-VERSION=v0.2.5
+VERSION=0.2.5
 
 helm install spillway ./charts/spillway \
   --namespace spillway-system \
@@ -160,7 +160,7 @@ helm upgrade spillway oci://ghcr.io/kroy-the-rabbit/charts/spillway \
 | Key | Default | Description |
 |-----|---------|-------------|
 | `image.repository` | `ghcr.io/kroy-the-rabbit/spillway` | Controller image repository |
-| `image.tag` | chart `appVersion` | Image tag (`v0.2.5` image tag when appVersion is `0.2.5`) |
+| `image.tag` | chart `appVersion` | Image tag (`0.2.5` when appVersion is `0.2.5`) |
 | `replicaCount` | `2` | Number of controller replicas |
 | `controller.leaderElect` | `true` | Enable leader election |
 | `controller.syncPeriod` | `5m` | Full informer resync interval |
@@ -175,7 +175,7 @@ See `charts/spillway/values.yaml` for full defaults.
 
 ## Deploy (Kustomize, simple/dev)
 
-`config/default` uses image tag `v0.2.5` by default. Apply with:
+`config/default` uses image tag `0.2.5` by default. Apply with:
 
 ```bash
 kubectl apply -k config/default
@@ -185,7 +185,7 @@ kubectl apply -k config/default
 
 ```bash
 # Single-arch
-VERSION=v0.2.5
+VERSION=0.2.5
 docker build --build-arg VERSION="${VERSION}" -t "ghcr.io/kroy-the-rabbit/spillway:${VERSION}" .
 
 # Multi-arch (requires docker buildx)

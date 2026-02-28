@@ -65,11 +65,10 @@ ServiceAccount name.
 
 {{/*
 The container image reference.
-The release pipeline tags images as "v{version}" (e.g. v0.1.2) while Chart.yaml
-stores appVersion without the "v" prefix. When image.tag is empty we prepend "v"
-so the default resolves correctly without an explicit --set image.tag override.
+The release pipeline publishes an image tag matching Chart.yaml appVersion
+(e.g. appVersion 0.2.5 -> image tag 0.2.5). Users can still override image.tag.
 */}}
 {{- define "spillway.image" -}}
-{{- $tag := .Values.image.tag | default (printf "v%s" .Chart.AppVersion) }}
+{{- $tag := .Values.image.tag | default .Chart.AppVersion }}
 {{- printf "%s:%s" .Values.image.repository $tag }}
 {{- end }}
