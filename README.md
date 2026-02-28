@@ -64,9 +64,13 @@ Replicas are marked with:
 ### Install from GHCR OCI chart
 
 ```bash
+# Pick a released chart version from:
+# https://github.com/kroy-the-rabbit/spillway/releases
+VERSION=0.2.5
+
 helm registry login ghcr.io
 helm install spillway oci://ghcr.io/kroy-the-rabbit/charts/spillway \
-  --version 0.2.5 \
+  --version "${VERSION}" \
   --namespace spillway-system \
   --create-namespace
 ```
@@ -74,18 +78,23 @@ helm install spillway oci://ghcr.io/kroy-the-rabbit/charts/spillway \
 ### Upgrade from GHCR OCI chart
 
 ```bash
+# Reuse the same VERSION value used at install time.
 helm upgrade spillway oci://ghcr.io/kroy-the-rabbit/charts/spillway \
-  --version 0.2.5 \
+  --version "${VERSION}" \
   --namespace spillway-system
 ```
 
 ### Install from local chart path
 
 ```bash
+# Pick a released app image tag from:
+# https://github.com/kroy-the-rabbit/spillway/releases
+VERSION=v0.2.5
+
 helm install spillway ./charts/spillway \
   --namespace spillway-system \
   --create-namespace \
-  --set image.tag=v0.2.5
+  --set image.tag="${VERSION}"
 ```
 
 ### Uninstall
@@ -176,13 +185,14 @@ kubectl apply -k config/default
 
 ```bash
 # Single-arch
-docker build --build-arg VERSION=v0.2.5 -t ghcr.io/kroy-the-rabbit/spillway:v0.2.5 .
+VERSION=v0.2.5
+docker build --build-arg VERSION="${VERSION}" -t "ghcr.io/kroy-the-rabbit/spillway:${VERSION}" .
 
 # Multi-arch (requires docker buildx)
 docker buildx build \
   --platform linux/amd64,linux/arm64 \
-  --build-arg VERSION=v0.2.5 \
-  -t ghcr.io/kroy-the-rabbit/spillway:v0.2.5 \
+  --build-arg VERSION="${VERSION}" \
+  -t "ghcr.io/kroy-the-rabbit/spillway:${VERSION}" \
   --push .
 ```
 

@@ -28,8 +28,15 @@ jobs:
       - name: Run unit and smoke tests
         run: go test ./...
 
+      - name: Run race tests
+        run: go test -race ./...
+
       - name: Run go vet
         run: go vet ./...
+
+      - name: Build binary
+        run: |
+          go build -ldflags="-X main.version=ci" -o /tmp/spillway ./cmd/spillway
 
   helm:
     runs-on: ubuntu-latest
@@ -51,3 +58,11 @@ jobs:
             --set metrics.serviceMonitor.enabled=false > /tmp/spillway-render.yaml
           test -s /tmp/spillway-render.yaml
 
+      - name: Helm install dry-run
+        run: |
+          helm install spillway charts/spillway \
+            --namespace spillway-system \
+            --create-namespace \
+            --set image.tag=test \
+            --dry-run --debug > /tmp/spillway-install-dry-run.txt
+          test -s /tmp/spillway-install-dry-run.txt

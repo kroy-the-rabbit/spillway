@@ -192,7 +192,8 @@
 
   <section>
     <h2>Install</h2>
-    <pre><code>helm install spillway oci://ghcr.io/kroy-the-rabbit/charts/spillway \
+    <pre><code># replace 0.2.5 with your target release
+helm install spillway oci://ghcr.io/kroy-the-rabbit/charts/spillway \
   --version 0.2.5 \
   --namespace spillway-system \
   --create-namespace</code></pre>
@@ -270,7 +271,8 @@ data:
 
   <section>
     <h2>Upgrade</h2>
-    <pre><code>helm upgrade spillway oci://ghcr.io/kroy-the-rabbit/charts/spillway \
+    <pre><code># replace 0.2.5 with your target release
+helm upgrade spillway oci://ghcr.io/kroy-the-rabbit/charts/spillway \
   --version 0.2.5 \
   --namespace spillway-system \
   --reuse-values</code></pre>
