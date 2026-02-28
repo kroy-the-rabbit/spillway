@@ -151,6 +151,68 @@ func TestConfigMapReconcileSmoke_ManagedByLabelIsSet(t *testing.T) {
 	}
 }
 
+func TestConfigMapReconcileSmoke_CleanupHandlesManagedReplicaWithoutLabel(t *testing.T) {
+	ctx := context.Background()
+	unlabeledReplica := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "shared-config",
+			Namespace: "team-b",
+			Annotations: map[string]string{
+				AnnotationManagedBy:  ManagedByValue,
+				AnnotationSourceFrom: "ConfigMap/platform/shared-config",
+			},
+		},
+	}
+	c, scheme := newCMSmokeClient(t,
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "platform"}},
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "team-a"}},
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "team-b"}},
+		&corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "shared-config",
+				Namespace: "platform",
+				Annotations: map[string]string{
+					AnnotationReplicateTo: "team-a",
+				},
+			},
+			Data: map[string]string{"key": "value"},
+		},
+		unlabeledReplica,
+	)
+
+	r := &ConfigMapReconciler{Client: c, Scheme: scheme, Log: log.Log.WithName("test"), Recorder: record.NewFakeRecorder(100)}
+	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "platform", Name: "shared-config"}}); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+
+	var deleted corev1.ConfigMap
+	if err := c.Get(ctx, client.ObjectKey{Namespace: "team-b", Name: "shared-config"}, &deleted); !apierrors.IsNotFound(err) {
+		t.Fatalf("expected unlabeled managed replica to be deleted, got err=%v", err)
+	}
+}
+
+func TestConfigMapReconcileSmoke_InvalidMatchingSelectorDoesNotError(t *testing.T) {
+	ctx := context.Background()
+	c, scheme := newCMSmokeClient(t,
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "platform"}},
+		&corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "shared-config",
+				Namespace: "platform",
+				Annotations: map[string]string{
+					AnnotationReplicateToMatching: "!!!invalid!!!",
+				},
+			},
+			Data: map[string]string{"key": "value"},
+		},
+	)
+
+	r := &ConfigMapReconciler{Client: c, Scheme: scheme, Log: log.Log.WithName("test"), Recorder: record.NewFakeRecorder(100)}
+	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "platform", Name: "shared-config"}}); err != nil {
+		t.Fatalf("expected invalid selector to be handled without reconcile error, got: %v", err)
+	}
+}
+
 func newCMSmokeClient(t *testing.T, objs ...client.Object) (client.Client, *runtime.Scheme) {
 	t.Helper()
 	scheme := runtime.NewScheme()

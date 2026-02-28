@@ -158,9 +158,10 @@ func TestSecretReconcileSmoke_ManagedByLabelIsSet(t *testing.T) {
 	}
 }
 
-func TestSecretReconcileSmoke_CleanupUsesLabelFilter(t *testing.T) {
+func TestSecretReconcileSmoke_CleanupHandlesManagedReplicaWithoutLabel(t *testing.T) {
 	ctx := context.Background()
-	// Pre-create a replica WITHOUT the managed-by label — it should not be touched by cleanup
+	// Pre-create a replica WITHOUT the managed-by label; cleanup should still find it
+	// via source index + annotation and delete it.
 	unlabeledReplica := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "shared-api-token",
@@ -195,10 +196,32 @@ func TestSecretReconcileSmoke_CleanupUsesLabelFilter(t *testing.T) {
 		t.Fatalf("reconcile: %v", err)
 	}
 
-	// The unlabeled replica in team-b should be untouched (label filter skips it)
-	var stillThere corev1.Secret
-	if err := c.Get(ctx, client.ObjectKey{Namespace: "team-b", Name: "shared-api-token"}, &stillThere); err != nil {
-		t.Fatalf("unlabeled replica should not be deleted by label-filtered cleanup: %v", err)
+	var deleted corev1.Secret
+	if err := c.Get(ctx, client.ObjectKey{Namespace: "team-b", Name: "shared-api-token"}, &deleted); !apierrors.IsNotFound(err) {
+		t.Fatalf("expected unlabeled managed replica to be deleted, got err=%v", err)
+	}
+}
+
+func TestSecretReconcileSmoke_InvalidMatchingSelectorDoesNotError(t *testing.T) {
+	ctx := context.Background()
+	c, scheme := newSecretSmokeClient(t,
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "platform"}},
+		&corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "shared-api-token",
+				Namespace: "platform",
+				Annotations: map[string]string{
+					AnnotationReplicateToMatching: "!!!invalid!!!",
+				},
+			},
+			Type: corev1.SecretTypeOpaque,
+			Data: map[string][]byte{"token": []byte("abc")},
+		},
+	)
+
+	r := &SecretReconciler{Client: c, Scheme: scheme, Log: log.Log.WithName("test"), Recorder: record.NewFakeRecorder(100)}
+	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "platform", Name: "shared-api-token"}}); err != nil {
+		t.Fatalf("expected invalid selector to be handled without reconcile error, got: %v", err)
 	}
 }
 

@@ -3,7 +3,6 @@ package controller
 import (
 	"context"
 	"errors"
-	"fmt"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -48,7 +47,12 @@ func (r *ConfigMapReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	excludeSelector := listExcludeSelector(&src)
 	matchingSel, err := listMatchingSelector(&src)
 	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("invalid %s annotation: %w", AnnotationReplicateToMatching, err)
+		log.Info("invalid replicate-to-matching selector; skipping until annotation is fixed", "error", err.Error())
+		if r.Recorder != nil {
+			r.Recorder.Eventf(&src, corev1.EventTypeWarning, "InvalidSelector",
+				"Invalid %s annotation: %v", AnnotationReplicateToMatching, err)
+		}
+		return ctrl.Result{}, nil
 	}
 	desc := sourceDescriptor{
 		kind:      "ConfigMap",
@@ -177,7 +181,6 @@ func (r *ConfigMapReconciler) cleanupReplicatedConfigMaps(ctx context.Context, d
 	if err := r.List(
 		ctx,
 		&all,
-		client.MatchingLabels{LabelManagedBy: ManagedByValue},
 		client.MatchingFields{configMapReplicaSourceFieldIdx: desc.sourceFrom()},
 	); err != nil {
 		return 0, err
@@ -213,7 +216,7 @@ func (r *ConfigMapReconciler) sourceRequestsForNamespace(ctx context.Context, ob
 	}
 
 	var all corev1.ConfigMapList
-	if err := r.List(ctx, &all); err != nil {
+	if err := r.List(ctx, &all, client.MatchingFields{cmSourceTargetingFieldIdx: "true"}); err != nil {
 		r.Log.Error(err, "failed to list configmaps for namespace event fan-out", "namespace", ns.Name)
 		return nil
 	}
@@ -239,6 +242,9 @@ func (r *ConfigMapReconciler) sourceRequestsForNamespace(ctx context.Context, ob
 
 func (r *ConfigMapReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	if err := registerConfigMapReplicaIndex(context.Background(), mgr); err != nil {
+		return err
+	}
+	if err := registerConfigMapSourceTargetingIndex(context.Background(), mgr); err != nil {
 		return err
 	}
 

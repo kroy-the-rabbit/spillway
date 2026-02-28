@@ -46,6 +46,8 @@ const (
 
 	secretReplicaSourceFieldIdx    = "spillway.kroy.io/index.secret-source-from"
 	configMapReplicaSourceFieldIdx = "spillway.kroy.io/index.configmap-source-from"
+	secretSourceTargetingFieldIdx  = "spillway.kroy.io/index.secret-has-targeting"
+	cmSourceTargetingFieldIdx      = "spillway.kroy.io/index.configmap-has-targeting"
 )
 
 var defaultProtectedNamespaces = map[string]struct{}{
@@ -113,6 +115,31 @@ func resolveTargetNamespaces(
 ) ([]string, error) {
 	if include.empty() && matchingSel == nil {
 		return nil, nil
+	}
+
+	// Fast path: explicit namespace targets only (no globs/all/label selector).
+	// Resolve directly against namespace GETs to avoid full namespace scans.
+	if !include.all && len(include.globs) == 0 && matchingSel == nil {
+		out := make([]string, 0, len(include.exact))
+		for nsName := range include.exact {
+			if nsName == sourceNamespace {
+				continue
+			}
+			if exclude.matchesNamespace(nsName) {
+				continue
+			}
+			var ns corev1.Namespace
+			err := c.Get(ctx, types.NamespacedName{Name: nsName}, &ns)
+			if err != nil {
+				if apierrors.IsNotFound(err) {
+					continue
+				}
+				return nil, err
+			}
+			out = append(out, nsName)
+		}
+		sort.Strings(out)
+		return out, nil
 	}
 
 	var nsList corev1.NamespaceList
@@ -438,6 +465,19 @@ func registerSecretReplicaIndex(ctx context.Context, mgr ctrl.Manager) error {
 	})
 }
 
+func registerSecretSourceTargetingIndex(ctx context.Context, mgr ctrl.Manager) error {
+	return mgr.GetFieldIndexer().IndexField(ctx, &corev1.Secret{}, secretSourceTargetingFieldIdx, func(obj client.Object) []string {
+		secret, ok := obj.(*corev1.Secret)
+		if !ok {
+			return nil
+		}
+		if sourceHasTargeting(secret) {
+			return []string{"true"}
+		}
+		return nil
+	})
+}
+
 func registerConfigMapReplicaIndex(ctx context.Context, mgr ctrl.Manager) error {
 	return mgr.GetFieldIndexer().IndexField(ctx, &corev1.ConfigMap{}, configMapReplicaSourceFieldIdx, func(obj client.Object) []string {
 		cm, ok := obj.(*corev1.ConfigMap)
@@ -445,6 +485,19 @@ func registerConfigMapReplicaIndex(ctx context.Context, mgr ctrl.Manager) error 
 			return nil
 		}
 		return replicaSourceFieldIndexValue(cm)
+	})
+}
+
+func registerConfigMapSourceTargetingIndex(ctx context.Context, mgr ctrl.Manager) error {
+	return mgr.GetFieldIndexer().IndexField(ctx, &corev1.ConfigMap{}, cmSourceTargetingFieldIdx, func(obj client.Object) []string {
+		cm, ok := obj.(*corev1.ConfigMap)
+		if !ok {
+			return nil
+		}
+		if sourceHasTargeting(cm) {
+			return []string{"true"}
+		}
+		return nil
 	})
 }
 
@@ -485,6 +538,15 @@ func listExcludeSelector(obj metav1.Object) targetSelector {
 
 func isForceAdopt(obj metav1.Object) bool {
 	return obj.GetAnnotations()[AnnotationForceAdopt] == "true"
+}
+
+func sourceHasTargeting(obj metav1.Object) bool {
+	if obj == nil || isManagedReplica(obj) {
+		return false
+	}
+	ann := obj.GetAnnotations()
+	return strings.TrimSpace(ann[AnnotationReplicateTo]) != "" ||
+		strings.TrimSpace(ann[AnnotationReplicateToMatching]) != ""
 }
 
 func ensureManagedOwnership(obj metav1.Object, desc sourceDescriptor, forceAdopt bool) error {
