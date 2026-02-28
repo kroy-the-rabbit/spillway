@@ -1,5 +1,17 @@
-repositoryID: 16c58df5-60ac-4326-899e-1195c377c4df
+repositoryID: 2b7b397c-70fd-4a24-b8fd-5f17d7121d67
+
+name: spillway
+displayName: Spillway Helm Charts
+description: Helm charts for the Spillway Kubernetes secret replication controller
+
+url: https://spillway.kroy.io
+homeURL: https://github.com/kroy-the-rabbit/spillway
+logoURL: https://raw.githubusercontent.com/kroy-the-rabbit/spillway/main/docs/logo.png
+
 owners:
   - name: kroy
     email: kroy@kroy.io
+
 ignore: []
+
+contentMediaType: application/vnd.cncf.helm.config.v1+json
