@@ -26,7 +26,7 @@ spec:
       terminationGracePeriodSeconds: 10
       containers:
         - name: manager
-          image: ghcr.io/kroy-the-rabbit/spillway:v0.2.5
+          image: ghcr.io/kroy-the-rabbit/spillway:0.2.5
           imagePullPolicy: IfNotPresent
           args:
             - --leader-elect=true

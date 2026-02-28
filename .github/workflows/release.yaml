@@ -84,6 +84,7 @@ jobs:
         with:
           images: ${{ env.IMAGE_REPO }}
           tags: |
+            type=raw,value=${{ steps.vars.outputs.version }}
             type=raw,value=${{ steps.vars.outputs.tag }}
             type=raw,value=latest,enable=${{ steps.vars.outputs.is_prerelease == 'false' }}
             type=raw,value=${{ steps.vars.outputs.major_minor }},enable=${{ steps.vars.outputs.is_prerelease == 'false' }}
@@ -96,7 +97,7 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           build-args: |
-            VERSION=${{ steps.vars.outputs.tag }}
+            VERSION=${{ steps.vars.outputs.version }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 

@@ -9,5 +9,4 @@ resources:
 
 images:
   - name: ghcr.io/kroy-the-rabbit/spillway
-    newTag: v0.2.5
-
+    newTag: 0.2.5
