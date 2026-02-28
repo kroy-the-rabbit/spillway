@@ -9,6 +9,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -34,7 +35,7 @@ func TestSecretReconcileSmoke_AllRespectsDefaultExcludes(t *testing.T) {
 		},
 	)
 
-	r := &SecretReconciler{Client: c, Scheme: scheme, Log: log.Log.WithName("test")}
+	r := &SecretReconciler{Client: c, Scheme: scheme, Log: log.Log.WithName("test"), Recorder: record.NewFakeRecorder(100)}
 	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "platform", Name: "shared-api-token"}}); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
@@ -75,7 +76,7 @@ func TestSecretReconcileSmoke_ExplicitKubeSystemIncludeOverridesDefault(t *testi
 		},
 	)
 
-	r := &SecretReconciler{Client: c, Scheme: scheme, Log: log.Log.WithName("test")}
+	r := &SecretReconciler{Client: c, Scheme: scheme, Log: log.Log.WithName("test"), Recorder: record.NewFakeRecorder(100)}
 	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "platform", Name: "shared-api-token"}}); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
@@ -108,7 +109,7 @@ func TestSecretReconcileSmoke_LabelSelectorTargeting(t *testing.T) {
 		},
 	)
 
-	r := &SecretReconciler{Client: c, Scheme: scheme, Log: log.Log.WithName("test")}
+	r := &SecretReconciler{Client: c, Scheme: scheme, Log: log.Log.WithName("test"), Recorder: record.NewFakeRecorder(100)}
 	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "platform", Name: "shared-api-token"}}); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
@@ -143,7 +144,7 @@ func TestSecretReconcileSmoke_ManagedByLabelIsSet(t *testing.T) {
 		},
 	)
 
-	r := &SecretReconciler{Client: c, Scheme: scheme, Log: log.Log.WithName("test")}
+	r := &SecretReconciler{Client: c, Scheme: scheme, Log: log.Log.WithName("test"), Recorder: record.NewFakeRecorder(100)}
 	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "platform", Name: "shared-api-token"}}); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
@@ -189,7 +190,7 @@ func TestSecretReconcileSmoke_CleanupUsesLabelFilter(t *testing.T) {
 		unlabeledReplica,
 	)
 
-	r := &SecretReconciler{Client: c, Scheme: scheme, Log: log.Log.WithName("test")}
+	r := &SecretReconciler{Client: c, Scheme: scheme, Log: log.Log.WithName("test"), Recorder: record.NewFakeRecorder(100)}
 	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "platform", Name: "shared-api-token"}}); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
@@ -219,7 +220,7 @@ func TestSecretReconcileSmoke_DeletedReplicaIsRecreated(t *testing.T) {
 		},
 	)
 
-	r := &SecretReconciler{Client: c, Scheme: scheme, Log: log.Log.WithName("test")}
+	r := &SecretReconciler{Client: c, Scheme: scheme, Log: log.Log.WithName("test"), Recorder: record.NewFakeRecorder(100)}
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "platform", Name: "shared-api-token"}}
 
 	// Initial reconcile — creates replica.

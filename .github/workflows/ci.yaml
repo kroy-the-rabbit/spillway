@@ -13,30 +13,32 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
           cache: true
 
       - name: Verify gofmt
         run: |
-          files="$(find cmd internal -name '*.go' -type f | tr '\n' ' ')"
-          test -z "$(gofmt -l $files)"
+          test -z "$(gofmt -l $(go list -f '{{.Dir}}' ./...))"
 
       - name: Run unit and smoke tests
         run: go test ./...
+
+      - name: Run go vet
+        run: go vet ./...
 
   helm:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
       - name: Setup Helm
-        uses: azure/setup-helm@v4
+        uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
 
       - name: Helm lint
         run: helm lint charts/spillway

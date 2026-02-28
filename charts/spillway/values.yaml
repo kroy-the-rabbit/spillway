@@ -88,6 +88,17 @@ readinessProbe:
   timeoutSeconds: 5
   failureThreshold: 3
 
+# -- Startup probe configuration. Disabled by default (null). Enable to protect
+# against premature liveness failures during leader lease acquisition on slow nodes.
+# Example:
+#   startupProbe:
+#     httpGet:
+#       path: /healthz
+#       port: probes
+#     failureThreshold: 30
+#     periodSeconds: 10
+startupProbe: {}
+
 # -- Seconds the Pod is given to finish in-flight reconciliations on shutdown.
 terminationGracePeriodSeconds: 10
 

@@ -290,7 +290,7 @@ func parseSourceFrom(kind, raw string) (namespace, name string, ok bool) {
 }
 
 func logTargetSync(log logr.Logger, desc sourceDescriptor, targets []string) {
-	log.Info("reconciling replication targets", "source", desc.sourceKey(), "targets", targets)
+	log.V(1).Info("reconciling replication targets", "source", desc.sourceKey(), "targets", targets)
 }
 
 func sourceRequestsFromManagedReplica(log logr.Logger, obj client.Object, kind, eventName string) []reconcile.Request {

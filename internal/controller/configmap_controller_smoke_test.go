@@ -9,6 +9,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -33,7 +34,7 @@ func TestConfigMapReconcileSmoke_AllRespectsDefaultExcludes(t *testing.T) {
 		},
 	)
 
-	r := &ConfigMapReconciler{Client: c, Scheme: scheme, Log: log.Log.WithName("test")}
+	r := &ConfigMapReconciler{Client: c, Scheme: scheme, Log: log.Log.WithName("test"), Recorder: record.NewFakeRecorder(100)}
 	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "platform", Name: "shared-config"}}); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
@@ -70,7 +71,7 @@ func TestConfigMapReconcileSmoke_ExplicitKubeSystemIncludeOverridesDefault(t *te
 		},
 	)
 
-	r := &ConfigMapReconciler{Client: c, Scheme: scheme, Log: log.Log.WithName("test")}
+	r := &ConfigMapReconciler{Client: c, Scheme: scheme, Log: log.Log.WithName("test"), Recorder: record.NewFakeRecorder(100)}
 	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "platform", Name: "shared-config"}}); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
@@ -102,7 +103,7 @@ func TestConfigMapReconcileSmoke_LabelSelectorTargeting(t *testing.T) {
 		},
 	)
 
-	r := &ConfigMapReconciler{Client: c, Scheme: scheme, Log: log.Log.WithName("test")}
+	r := &ConfigMapReconciler{Client: c, Scheme: scheme, Log: log.Log.WithName("test"), Recorder: record.NewFakeRecorder(100)}
 	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "platform", Name: "shared-config"}}); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
@@ -136,7 +137,7 @@ func TestConfigMapReconcileSmoke_ManagedByLabelIsSet(t *testing.T) {
 		},
 	)
 
-	r := &ConfigMapReconciler{Client: c, Scheme: scheme, Log: log.Log.WithName("test")}
+	r := &ConfigMapReconciler{Client: c, Scheme: scheme, Log: log.Log.WithName("test"), Recorder: record.NewFakeRecorder(100)}
 	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "platform", Name: "shared-config"}}); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}

@@ -7,3 +7,7 @@ resources:
   - ../rbac/clusterrolebinding.yaml
   - ../manager/deployment.yaml
 
+images:
+  - name: ghcr.io/kroy-the-rabbit/spillway
+    newTag: v0.2.4
+

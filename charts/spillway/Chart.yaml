@@ -4,14 +4,15 @@ description: >
   Replicates Kubernetes Secrets and ConfigMaps across namespaces in near real
   time using annotations on the source object.
 type: application
-version: 0.2.3
-appVersion: "0.2.3"
+version: 0.2.4
+appVersion: "0.2.4"
 keywords:
   - kubernetes
   - secrets
   - configmaps
   - replication
   - controller
+icon: https://raw.githubusercontent.com/kroy-the-rabbit/spillway/main/icon.svg
 home: https://github.com/kroy-the-rabbit/spillway
 sources:
   - https://github.com/kroy-the-rabbit/spillway
@@ -23,22 +24,18 @@ annotations:
   artifacthub.io/displayName: Spillway
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
-    - kind: added
-      description: Namespace watches now trigger immediate reconcile on namespace create and label changes
-    - kind: fixed
-      description: Pre-existing unmanaged target objects are reported as informational skips instead of warnings
-    - kind: fixed
-      description: Add self-heal fallback requeue, indexed cleanup, and replica delete remap hardening
-    - kind: fixed
-      description: Helm reuse-values upgrades now default selfHealInterval safely
-    - kind: added
-      description: Label-selector namespace targeting (replicate-to-matching)
-    - kind: added
-      description: Kubernetes Events on replication success and failure
-    - kind: added
-      description: Custom Prometheus metric spillway_replications_total
     - kind: security
-      description: Cleanup now filters by managed-by label (was unbounded List)
+      description: Pin all GitHub Actions to commit SHAs to prevent supply chain attacks
+    - kind: added
+      description: Startup probe support in Helm chart (opt-in via startupProbe value)
+    - kind: added
+      description: SECURITY.md with private disclosure policy and operational considerations
+    - kind: added
+      description: Project icon wired into ArtifactHub
+    - kind: changed
+      description: Per-target sync logging moved to verbosity level 1 to reduce default log noise
+    - kind: fixed
+      description: Kustomize probes now include timeoutSeconds and failureThreshold
   artifacthub.io/maintainers: |
     - name: kroy
       email: kroy@kroy.io

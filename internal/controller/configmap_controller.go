@@ -145,25 +145,23 @@ func (r *ConfigMapReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		changedCount += deletedCount
 	}
 
-	if r.Recorder != nil {
-		if len(errs) == 0 {
-			if changedCount > 0 {
-				r.Recorder.Eventf(&src, corev1.EventTypeNormal, "ReplicationSucceeded",
-					"Applied %d change(s) across %d target namespace(s)", changedCount, len(targets))
-				ReplicationsTotal.WithLabelValues("ConfigMap", "success").Add(float64(changedCount))
-			}
-			if skippedConflicts > 0 {
-				r.Recorder.Eventf(&src, corev1.EventTypeNormal, "ReplicationSkipped",
-					"Skipped %d target namespace(s) with pre-existing unmanaged objects", skippedConflicts)
-			}
-		} else {
-			r.Recorder.Eventf(&src, corev1.EventTypeWarning, "ReplicationFailed",
-				"Failed to replicate to %d/%d namespace(s)", len(errs), len(targets))
-			ReplicationsTotal.WithLabelValues("ConfigMap", "error").Add(float64(len(errs)))
-			if skippedConflicts > 0 {
-				r.Recorder.Eventf(&src, corev1.EventTypeNormal, "ReplicationSkipped",
-					"Skipped %d target namespace(s) with pre-existing unmanaged objects", skippedConflicts)
-			}
+	if len(errs) == 0 {
+		if changedCount > 0 {
+			r.Recorder.Eventf(&src, corev1.EventTypeNormal, "ReplicationSucceeded",
+				"Applied %d change(s) across %d target namespace(s)", changedCount, len(targets))
+			ReplicationsTotal.WithLabelValues("ConfigMap", "success").Add(float64(changedCount))
+		}
+		if skippedConflicts > 0 {
+			r.Recorder.Eventf(&src, corev1.EventTypeNormal, "ReplicationSkipped",
+				"Skipped %d target namespace(s) with pre-existing unmanaged objects", skippedConflicts)
+		}
+	} else {
+		r.Recorder.Eventf(&src, corev1.EventTypeWarning, "ReplicationFailed",
+			"Failed to replicate to %d/%d namespace(s)", len(errs), len(targets))
+		ReplicationsTotal.WithLabelValues("ConfigMap", "error").Add(float64(len(errs)))
+		if skippedConflicts > 0 {
+			r.Recorder.Eventf(&src, corev1.EventTypeNormal, "ReplicationSkipped",
+				"Skipped %d target namespace(s) with pre-existing unmanaged objects", skippedConflicts)
 		}
 	}
 
