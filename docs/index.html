@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>spillway</title>
+  <meta name="description" content="Replicate Kubernetes Secrets and ConfigMaps across namespaces via annotations.">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <style>
+    :root {
+      --bg:       #0f172a;
+      --surface:  #1e293b;
+      --border:   #334155;
+      --text:     #e2e8f0;
+      --muted:    #94a3b8;
+      --accent:   #38bdf8;
+      --code-bg:  #1e293b;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      font-size: 1rem;
+      line-height: 1.65;
+    }
+
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    .wrap {
+      max-width: 700px;
+      margin: 0 auto;
+      padding: 0 1.5rem;
+    }
+
+    /* ── Header ── */
+    header {
+      padding: 4.5rem 0 2.5rem;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      gap: 1rem;
+    }
+
+    header img {
+      width: 88px;
+      height: 88px;
+    }
+
+    h1 {
+      font-size: 2.6rem;
+      font-weight: 800;
+      letter-spacing: -0.04em;
+      color: var(--accent);
+    }
+
+    .tagline {
+      color: var(--muted);
+      font-size: 1.05rem;
+      max-width: 480px;
+    }
+
+    /* ── Sections ── */
+    section {
+      padding: 2.25rem 0;
+      border-top: 1px solid var(--border);
+    }
+
+    h2 {
+      font-size: 0.78rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--muted);
+      margin-bottom: 1rem;
+    }
+
+    p { margin-bottom: 0.9rem; }
+    p:last-child { margin-bottom: 0; }
+
+    /* ── Inline code ── */
+    code {
+      font-family: ui-monospace, "Cascadia Code", "Fira Code", Menlo, monospace;
+      font-size: 0.85em;
+      background: var(--code-bg);
+      color: var(--accent);
+      padding: 0.15em 0.45em;
+      border-radius: 4px;
+      border: 1px solid var(--border);
+    }
+
+    /* ── Code blocks ── */
+    pre {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1.1rem 1.4rem;
+      overflow-x: auto;
+      margin: 0.9rem 0;
+      line-height: 1.55;
+    }
+
+    pre code {
+      background: none;
+      border: none;
+      padding: 0;
+      font-size: 0.875rem;
+      color: var(--text);
+    }
+
+    /* ── Annotation table ── */
+    .table-wrap {
+      overflow-x: auto;
+      margin: 0.5rem 0;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.875rem;
+    }
+
+    th {
+      text-align: left;
+      padding: 0.6rem 1rem;
+      background: var(--surface);
+      color: var(--muted);
+      font-weight: 600;
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      border-bottom: 1px solid var(--border);
+    }
+
+    td {
+      padding: 0.65rem 1rem;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+    }
+
+    tr:last-child td { border-bottom: none; }
+
+    td:first-child code {
+      font-size: 0.78rem;
+      white-space: nowrap;
+    }
+
+    .note {
+      color: var(--muted);
+      font-size: 0.875rem;
+      margin-top: 0.75rem;
+    }
+
+    /* ── Footer ── */
+    footer {
+      padding: 2rem 0 3.5rem;
+      border-top: 1px solid var(--border);
+      display: flex;
+      gap: 1.25rem;
+      align-items: center;
+      flex-wrap: wrap;
+      font-size: 0.875rem;
+      color: var(--muted);
+    }
+
+    footer a { color: var(--muted); }
+    footer a:hover { color: var(--accent); }
+
+    .spacer { flex: 1; }
+
+    /* ── Responsive ── */
+    @media (max-width: 500px) {
+      h1 { font-size: 2rem; }
+      pre { font-size: 0.8rem; }
+    }
+  </style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <img src="favicon.svg" alt="spillway logo" width="88" height="88">
+    <h1>spillway</h1>
+    <p class="tagline">replicate Kubernetes Secrets and ConfigMaps across namespaces via annotations</p>
+  </header>
+
+  <section>
+    <h2>Install</h2>
+    <pre><code>helm install spillway oci://ghcr.io/kroy-the-rabbit/charts/spillway \
+  --version 0.2.4 \
+  --namespace spillway-system \
+  --create-namespace</code></pre>
+    <p>Requires Kubernetes 1.25+ and Helm 3.10+. The chart is published to GHCR as an OCI artifact — no <code>helm repo add</code> needed.</p>
+  </section>
+
+  <section>
+    <h2>The idea</h2>
+    <p>You have a <code>Secret</code> in <code>platform</code> and every one of your tenant namespaces needs a copy. Copy-pasting YAML doesn't scale, and writing a script to keep them in sync is exactly as fun as it sounds.</p>
+    <p>Spillway watches your cluster. Add one annotation to a source object, and it handles creation, updates, and cleanup across whatever namespaces you target — by name, glob, or label selector.</p>
+  </section>
+
+  <section>
+    <h2>Usage</h2>
+    <p>Annotate a source object:</p>
+    <pre><code>apiVersion: v1
+kind: Secret
+metadata:
+  name: shared-api-token
+  namespace: platform
+  annotations:
+    spillway.kroy.io/replicate-to: "team-*,prod"
+type: Opaque
+stringData:
+  token: hunter2</code></pre>
+    <p>Spillway reconciles <code>shared-api-token</code> into every <code>team-*</code> namespace and into <code>prod</code>. It keeps them up to date as the source changes, and deletes them if the annotation is removed or the source is deleted.</p>
+    <p>ConfigMaps work exactly the same way.</p>
+    <pre><code>apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-settings
+  namespace: platform
+  annotations:
+    spillway.kroy.io/replicate-to: "team-*"
+    spillway.kroy.io/exclude-namespaces: "team-dev"
+data:
+  LOG_LEVEL: info</code></pre>
+    <p>You can also target by namespace label rather than name:</p>
+    <pre><code>  annotations:
+    spillway.kroy.io/replicate-to-matching: "env=prod"</code></pre>
+  </section>
+
+  <section>
+    <h2>Annotation reference</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Annotation</th>
+            <th>Description</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>spillway.kroy.io/replicate-to</code></td>
+            <td>Comma-separated targets. Accepts <code>all</code>, glob patterns like <code>team-*</code>, or explicit namespace names. Mix freely.</td>
+          </tr>
+          <tr>
+            <td><code>spillway.kroy.io/replicate-to-matching</code></td>
+            <td>Label selector targeting. E.g. <code>env=prod</code> or <code>tier=frontend,region=us</code>. Resolved at reconcile time.</td>
+          </tr>
+          <tr>
+            <td><code>spillway.kroy.io/exclude-namespaces</code></td>
+            <td>Comma-separated exclusions, same syntax as <code>replicate-to</code>. Always wins over includes.</td>
+          </tr>
+          <tr>
+            <td><code>spillway.kroy.io/force-adopt</code></td>
+            <td>Set to <code>"true"</code> to take ownership of a pre-existing unmanaged object with the same name instead of skipping it.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note"><code>kube-system</code> is excluded by default when using <code>all</code> or wildcards. Explicitly naming it overrides that.</p>
+  </section>
+
+  <section>
+    <h2>Upgrade</h2>
+    <pre><code>helm upgrade spillway oci://ghcr.io/kroy-the-rabbit/charts/spillway \
+  --version 0.2.4 \
+  --namespace spillway-system \
+  --reuse-values</code></pre>
+  </section>
+
+  <footer>
+    <a href="https://github.com/kroy-the-rabbit/spillway">GitHub</a>
+    <a href="https://artifacthub.io/packages/search?repo=spillway">Artifact Hub</a>
+    <a href="https://github.com/kroy-the-rabbit/spillway/blob/main/SECURITY.md">Security</a>
+    <span class="spacer"></span>
+    <span>Apache-2.0 &middot; a side project by <a href="https://kroy.io">kroy</a></span>
+  </footer>
+
+</div>
+</body>
+</html>
