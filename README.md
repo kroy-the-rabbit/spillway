@@ -2,77 +2,90 @@
 
 [![Artifact Hub](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/spillway)](https://artifacthub.io/packages/search?repo=spillway)
 
-`spillway` replicates Kubernetes `Secrets` and `ConfigMaps` to other namespaces in near real time using annotations on the source object.
+`spillway` replicates Kubernetes `Secrets` and `ConfigMaps` across namespaces in near real time using source-object annotations.
+
+## Project links
+
+- Website (GitHub Pages): https://spillway.kroy.io
+- Source: https://github.com/kroy-the-rabbit/spillway
+- Helm chart (OCI): `oci://ghcr.io/kroy-the-rabbit/charts/spillway`
+- Container image: `ghcr.io/kroy-the-rabbit/spillway`
+
+The website is published from the `docs/` directory by `.github/workflows/deploy-pages.yaml` on pushes to `main`.
 
 ## How it works
 
-- Add `spillway.kroy.io/replicate-to` to a source `Secret` or `ConfigMap`.
-- The controller watches all namespaces.
-- It creates or updates same-name replicas in target namespaces.
-- If the annotation is removed, targets are deleted.
-- If the source is deleted, replicas are deleted via a finalizer.
+- Add replication annotations to a source `Secret` or `ConfigMap`.
+- Spillway reconciles same-name replicas in target namespaces.
+- Removing replication annotations triggers cleanup of now-out-of-scope replicas.
+- Deleting a source object triggers finalizer-based replica cleanup.
+- Spillway watches namespace create events and label changes so namespace targeting updates promptly.
 
 ## Annotation contract
 
-- `spillway.kroy.io/replicate-to`: Comma-separated targets with support for:
-  - `all` (or `*`) for every namespace except the source namespace
-  - wildcard patterns like `team-*`
-  - specific namespaces like `payments`
-  - mixed values like `team-*,sandbox,prod`
-- `spillway.kroy.io/exclude-namespaces`: Optional comma-separated exclusions using the same syntax
-  - Example: `team-dev,team-qa-*`
+### Target selection
 
-Replicas are marked with metadata so Spillway can identify and reconcile them:
+- `spillway.kroy.io/replicate-to`
+  - Comma-separated namespace targets
+  - Supports `all` or `*`, globs like `team-*`, explicit names like `payments`, or mixed forms
+- `spillway.kroy.io/replicate-to-matching`
+  - Kubernetes label selector for namespace labels (for example `env=prod` or `tier=frontend,region=us`)
+  - Can be used together with `replicate-to`
+- `spillway.kroy.io/exclude-namespaces`
+  - Optional comma-separated exclusions, same syntax as `replicate-to`
+  - Always takes precedence over include targeting
 
-- `spillway.kroy.io/managed-by=spillway`
-- `spillway.kroy.io/source-from` (format: `Kind/namespace/name`)
+### Ownership and adoption
+
+- `spillway.kroy.io/force-adopt: "true"`
+  - Allows overwriting pre-existing unmanaged target objects and taking ownership
+  - Default behavior is to skip conflicting unmanaged objects
+
+Replicas are marked with:
+
+- `spillway.kroy.io/managed-by=spillway` (annotation + label)
+- `spillway.kroy.io/source-from=Kind/namespace/name`
 
 ## Behavior notes
 
-- Replicas use the same object name as the source.
 - Source labels are copied to replicas.
-- Non-Spillway annotations are copied to replicas.
-- Spillway ignores objects that are already managed replicas (prevents replication loops).
-- `all`/wildcard resolution is evaluated against current namespaces during reconcile.
-- Newly created namespaces are picked up on the next source reconcile or periodic resync.
-- `kube-system` is excluded by default when matched through `all` or wildcard selectors.
-- Explicitly naming `kube-system` in `spillway.kroy.io/replicate-to` overrides that default.
-- `spillway.kroy.io/exclude-namespaces` always takes precedence over includes.
+- Spillway-specific annotations are not copied to replicas; non-Spillway annotations are copied.
+- Spillway ignores already managed replicas as reconciliation sources (prevents loops).
+- `kube-system` is protected by default for `all`/glob name targeting.
+- Explicitly naming `kube-system` in `replicate-to` or matching it via `replicate-to-matching` can include it.
 
----
-
-## Deploy (Helm — recommended)
+## Deploy (Helm, recommended)
 
 ### Prerequisites
 
 - Kubernetes 1.25+
 - Helm 3.10+
 
-### Install (from GitHub Container Registry OCI chart)
+### Install from GHCR OCI chart
 
 ```bash
 helm registry login ghcr.io
 helm install spillway oci://ghcr.io/kroy-the-rabbit/charts/spillway \
-  --version 0.1.0 \
+  --version 0.2.5 \
   --namespace spillway-system \
   --create-namespace
 ```
 
-### Install (from local repo path)
+### Upgrade from GHCR OCI chart
+
+```bash
+helm upgrade spillway oci://ghcr.io/kroy-the-rabbit/charts/spillway \
+  --version 0.2.5 \
+  --namespace spillway-system
+```
+
+### Install from local chart path
 
 ```bash
 helm install spillway ./charts/spillway \
   --namespace spillway-system \
   --create-namespace \
-  --set image.tag=v0.1.0
-```
-
-### Upgrade
-
-```bash
-helm upgrade spillway ./charts/spillway \
-  --namespace spillway-system \
-  --set image.tag=v0.2.0
+  --set image.tag=v0.2.5
 ```
 
 ### Uninstall
@@ -81,28 +94,15 @@ helm upgrade spillway ./charts/spillway \
 helm uninstall spillway --namespace spillway-system
 ```
 
-> **Note**: Helm uninstall removes the controller but does not delete existing replicas
-> that Spillway created in other namespaces. Those are cleaned up automatically when
-> the source object's annotation is removed before uninstalling.
-
----
+`helm uninstall` removes the controller, but it does not proactively remove previously created replicas. Remove source annotations before uninstall if you want Spillway to clean them up first.
 
 ## Production configuration
 
 ### High availability
 
-Run 2 replicas with leader election (only one actively reconciles; the other stands by):
+Defaults already run 2 replicas with leader election and a PodDisruptionBudget (`minAvailable: 1`).
 
-```bash
-helm install spillway ./charts/spillway \
-  --namespace spillway-system \
-  --set image.tag=v0.1.0 \
-  --set replicaCount=2 \
-  --set podDisruptionBudget.enabled=true \
-  --set podDisruptionBudget.minAvailable=1
-```
-
-Spread replicas across availability zones:
+Spread replicas across zones:
 
 ```yaml
 # values-prod.yaml
@@ -115,25 +115,23 @@ topologySpreadConstraints:
     labelSelector:
       matchLabels:
         app.kubernetes.io/name: spillway
-
-podDisruptionBudget:
-  enabled: true
-  minAvailable: 1
 ```
 
 ```bash
-helm install spillway ./charts/spillway \
+helm upgrade --install spillway oci://ghcr.io/kroy-the-rabbit/charts/spillway \
+  --version 0.2.5 \
   --namespace spillway-system \
-  -f values-prod.yaml \
-  --set image.tag=v0.1.0
+  --create-namespace \
+  -f values-prod.yaml
 ```
 
-### Prometheus metrics
+### Prometheus integration
 
-Enable a `ServiceMonitor` (requires [Prometheus Operator](https://github.com/prometheus-operator/prometheus-operator)):
+Enable `ServiceMonitor` (Prometheus Operator required):
 
 ```bash
-helm upgrade spillway ./charts/spillway \
+helm upgrade spillway oci://ghcr.io/kroy-the-rabbit/charts/spillway \
+  --version 0.2.5 \
   --namespace spillway-system \
   --set metrics.serviceMonitor.enabled=true \
   --set metrics.serviceMonitor.labels.release=prometheus
@@ -141,68 +139,50 @@ helm upgrade spillway ./charts/spillway \
 
 ### Network policy
 
-Restrict ingress to only the metrics and probe ports:
-
 ```bash
-helm upgrade spillway ./charts/spillway \
+helm upgrade spillway oci://ghcr.io/kroy-the-rabbit/charts/spillway \
+  --version 0.2.5 \
   --namespace spillway-system \
   --set networkPolicy.enabled=true
 ```
 
-### Private registry
-
-```yaml
-imagePullSecrets:
-  - name: my-registry-credentials
-
-serviceAccount:
-  annotations:
-    eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/spillway
-```
-
----
-
-## Key values reference
+## Key Helm values
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `image.repository` | `ghcr.io/kroy-the-rabbit/spillway` | Image repository |
-| `image.tag` | chart `appVersion` | Image tag |
+| `image.repository` | `ghcr.io/kroy-the-rabbit/spillway` | Controller image repository |
+| `image.tag` | chart `appVersion` | Image tag (`v0.2.5` image tag when appVersion is `0.2.5`) |
 | `replicaCount` | `2` | Number of controller replicas |
 | `controller.leaderElect` | `true` | Enable leader election |
-| `controller.syncPeriod` | `5m` | Full resync interval |
-| `controller.selfHealInterval` | `45s` | Per-object fallback requeue interval (`0` disables) |
-| `resources` | see values.yaml | CPU/memory requests and limits |
-| `podDisruptionBudget.enabled` | `true` | Create a PodDisruptionBudget |
-| `metrics.serviceMonitor.enabled` | `false` | Create a Prometheus ServiceMonitor |
-| `networkPolicy.enabled` | `true` | Restrict ingress via NetworkPolicy |
-| `createNamespace` | `true` | Create the release namespace |
+| `controller.syncPeriod` | `5m` | Full informer resync interval |
+| `controller.selfHealInterval` | `45s` | Per-source fallback requeue (`0` disables) |
+| `metrics.service.enabled` | `true` | Expose metrics service |
+| `metrics.serviceMonitor.enabled` | `false` | Create ServiceMonitor |
+| `podDisruptionBudget.enabled` | `true` | Create PodDisruptionBudget |
+| `networkPolicy.enabled` | `true` | Restrict ingress to probe/metrics ports |
+| `createNamespace` | `true` | Create release namespace |
 
-Full defaults are documented in [`charts/spillway/values.yaml`](charts/spillway/values.yaml).
+See `charts/spillway/values.yaml` for full defaults.
 
----
+## Deploy (Kustomize, simple/dev)
 
-## Deploy (Kustomize — simple/dev)
-
-Build and push an image, then update `config/manager/deployment.yaml` with your image.
+`config/default` uses image tag `v0.2.5` by default. Apply with:
 
 ```bash
 kubectl apply -k config/default
 ```
 
----
-
 ## Build
 
 ```bash
 # Single-arch
-docker build --build-arg VERSION=v0.1.0 -t ghcr.io/kroy-the-rabbit/spillway:v0.1.0 .
+docker build --build-arg VERSION=v0.2.5 -t ghcr.io/kroy-the-rabbit/spillway:v0.2.5 .
 
 # Multi-arch (requires docker buildx)
 docker buildx build \
   --platform linux/amd64,linux/arm64 \
-  --build-arg VERSION=v0.1.0 \
-  -t ghcr.io/kroy-the-rabbit/spillway:v0.1.0 \
+  --build-arg VERSION=v0.2.5 \
+  -t ghcr.io/kroy-the-rabbit/spillway:v0.2.5 \
   --push .
 ```
 
@@ -212,34 +192,30 @@ docker buildx build \
 go run ./cmd/spillway
 ```
 
-This uses your local kubeconfig and requires cluster-wide permissions equivalent to the provided RBAC.
-
----
+This uses local kubeconfig and requires cluster-wide permissions equivalent to the provided RBAC.
 
 ## Examples
 
-- `examples/configmap.yaml`
 - `examples/secret.yaml`
+- `examples/configmap.yaml`
 
----
+## Metrics
+
+In addition to controller-runtime metrics, Spillway exports:
+
+- `spillway_replications_total{kind,result}`
+- `spillway_reconcile_changes_total{kind,action}`
+- `spillway_cleanup_deletes_total{kind}`
+- `spillway_replica_remap_failures_total{kind,reason}`
 
 ## Limitations
 
-- Namespace targeting is annotation-based (`all`, globs, and explicit names), but namespace creation events are not watched (new namespaces are picked up on the next reconcile or periodic resync).
-- Cluster-wide cleanup lists all `Secrets`/`ConfigMaps` and filters in memory.
-- No custom metrics beyond controller-runtime defaults.
+- Spillway uses cluster-wide watches/lists for `Secrets`, `ConfigMaps`, and `Namespaces`; scope and permissions are cluster-level.
+- Cleanup is source-driven; if you uninstall without removing source annotations first, existing replicas remain.
 
-## Versioning And Releases
+## Versioning and releases
 
-- Spillway uses semantic versioning tags: `vMAJOR.MINOR.PATCH` (for example `v0.1.0`).
-- Until `v1.0.0`, minor versions may include annotation or behavior changes.
-- Patch releases are for backward-compatible fixes only.
-- Pre-releases use semver prerelease tags (for example `v0.2.0-rc.1`).
-- Git tags trigger GitHub Actions release automation (image build, Helm chart publish, GitHub release artifacts).
-- Helm chart `version` and `appVersion` should match the controller release version (without the leading `v`) for normal releases.
-
-## Best Practice (Default)
-
-- Excluding `kube-system` by default is a good baseline to reduce blast radius from accidental `all` replication.
-- Keep replication into system namespaces opt-in by explicit include.
-- Use `spillway.kroy.io/exclude-namespaces` for team-specific guardrails (`dev`, `scratch`, etc.).
+- Version tags: `vMAJOR.MINOR.PATCH` (example: `v0.2.5`)
+- Pre-releases: `vMAJOR.MINOR.PATCH-rc.N`
+- Release tags trigger GitHub Actions automation for binaries, container image, Helm OCI chart, and GitHub release assets.
+- `charts/spillway/Chart.yaml` `version` and `appVersion` must match the release version (without leading `v`).

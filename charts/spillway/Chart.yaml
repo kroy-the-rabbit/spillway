@@ -4,8 +4,8 @@ description: >
   Replicates Kubernetes Secrets and ConfigMaps across namespaces in near real
   time using annotations on the source object.
 type: application
-version: 0.2.4
-appVersion: "0.2.4"
+version: 0.2.5
+appVersion: "0.2.5"
 keywords:
   - kubernetes
   - secrets
@@ -13,7 +13,7 @@ keywords:
   - replication
   - controller
 icon: https://raw.githubusercontent.com/kroy-the-rabbit/spillway/main/icon.svg
-home: https://github.com/kroy-the-rabbit/spillway
+home: https://spillway.kroy.io
 sources:
   - https://github.com/kroy-the-rabbit/spillway
 maintainers:
@@ -23,19 +23,18 @@ annotations:
   artifacthub.io/category: security
   artifacthub.io/displayName: Spillway
   artifacthub.io/license: Apache-2.0
+  artifacthub.io/links: |
+    - name: Website
+      url: https://spillway.kroy.io
+    - name: Source
+      url: https://github.com/kroy-the-rabbit/spillway
   artifacthub.io/changes: |
-    - kind: security
-      description: Pin all GitHub Actions to commit SHAs to prevent supply chain attacks
-    - kind: added
-      description: Startup probe support in Helm chart (opt-in via startupProbe value)
-    - kind: added
-      description: SECURITY.md with private disclosure policy and operational considerations
-    - kind: added
-      description: Project icon wired into ArtifactHub
     - kind: changed
-      description: Per-target sync logging moved to verbosity level 1 to reduce default log noise
+      description: README and docs website updated to match current controller behavior and deployment defaults
+    - kind: changed
+      description: Artifact Hub metadata aligned with published Pages website links and project icon
     - kind: fixed
-      description: Kustomize probes now include timeoutSeconds and failureThreshold
+      description: Artifact Hub repository logo URL now points to an existing icon asset
   artifacthub.io/maintainers: |
     - name: kroy
       email: kroy@kroy.io

@@ -2,11 +2,11 @@ repositoryID: 2b7b397c-70fd-4a24-b8fd-5f17d7121d67
 
 name: spillway
 displayName: Spillway Helm Charts
-description: Helm charts for the Spillway Kubernetes secret replication controller
+description: Helm charts for the Spillway Kubernetes Secrets and ConfigMaps replication controller
 
 url: https://spillway.kroy.io
-homeURL: https://github.com/kroy-the-rabbit/spillway
-logoURL: https://raw.githubusercontent.com/kroy-the-rabbit/spillway/main/docs/logo.png
+homeURL: https://spillway.kroy.io
+logoURL: https://raw.githubusercontent.com/kroy-the-rabbit/spillway/main/icon.svg
 
 owners:
   - name: kroy
