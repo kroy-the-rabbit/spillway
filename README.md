@@ -2,7 +2,10 @@
 
 [![Artifact Hub](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/spillway)](https://artifacthub.io/packages/search?repo=spillway)
 
-`spillway` replicates Kubernetes `Secrets` and `ConfigMaps` across namespaces in near real time using source-object annotations.
+`spillway` replicates Kubernetes `Secrets` and `ConfigMaps` across namespaces in near real time. Two modes:
+
+- **Annotation-driven** — add a single annotation to any existing source object.
+- **SpillwayProfile** — a CRD for declarative platform bootstrap with no source annotations required.
 
 ## Project links
 
@@ -15,9 +18,9 @@ The website is published from the `docs/` directory by `.github/workflows/deploy
 
 ## How it works
 
-- Add replication annotations to a source `Secret` or `ConfigMap`.
+- Add replication annotations to a source `Secret` or `ConfigMap`, or create a `SpillwayProfile` CRD.
 - Spillway reconciles same-name replicas in target namespaces.
-- Removing replication annotations triggers cleanup of now-out-of-scope replicas.
+- Removing replication annotations (or deleting the profile) triggers cleanup of now-out-of-scope replicas.
 - Deleting a source object triggers finalizer-based replica cleanup.
 - Spillway watches namespace create events and label changes so namespace targeting updates promptly.
 
@@ -41,18 +44,78 @@ The website is published from the `docs/` directory by `.github/workflows/deploy
   - Allows overwriting pre-existing unmanaged target objects and taking ownership
   - Default behavior is to skip conflicting unmanaged objects
 
+### Key projection
+
+- `spillway.kroy.io/include-keys: "key1,key2"`
+  - Whitelist: only the listed data keys are copied into replicas
+  - Mutually exclusive with `exclude-keys`; `include-keys` takes precedence
+- `spillway.kroy.io/exclude-keys: "key1,key2"`
+  - Blacklist: the listed data keys are omitted from replicas
+
+### Replica TTL
+
+- `spillway.kroy.io/replica-ttl: "24h"`
+  - Go duration (e.g. `24h`, `7d`, `30m`). Replicas are stamped with an `expires-at` annotation at creation.
+  - Expired replicas are deleted on the next reconcile pass and recreated with a fresh TTL.
+
+### Namespace consent
+
+- `spillway.kroy.io/accept-from` on the **target Namespace** (not the source object)
+  - Absent → accept from all sources (backward-compatible default)
+  - `"all"` or `"*"` → accept from all sources
+  - `"platform"` → accept any object from the `platform` namespace
+  - `"platform:token"` → accept only the object named `token` from `platform`
+  - Comma-separated, mix and match
+
 Replicas are marked with:
 
 - `spillway.kroy.io/managed-by=spillway` (annotation + label)
-- `spillway.kroy.io/source-from=Kind/namespace/name`
+- `spillway.kroy.io/source-from=Kind/namespace/name` (annotation-based replicas)
+- `spillway.kroy.io/profile-ref=namespace/name` (profile-managed replicas)
 
 ## Behavior notes
 
-- Source labels are copied to replicas.
+- Source labels are copied to replicas (annotation-based mode).
 - Spillway-specific annotations are not copied to replicas; non-Spillway annotations are copied.
 - Spillway ignores already managed replicas as reconciliation sources (prevents loops).
 - `kube-system` is protected by default for `all`/glob name targeting.
 - Explicitly naming `kube-system` in `replicate-to` or matching it via `replicate-to-matching` can include it.
+
+## SpillwayProfile CRD
+
+`SpillwayProfile` is a namespaced CRD that declaratively replicates a set of Secrets and ConfigMaps from the profile's own namespace into any number of target namespaces — without annotating the sources.
+
+```yaml
+apiVersion: spillway.kroy.io/v1alpha1
+kind: SpillwayProfile
+metadata:
+  name: platform-secrets
+  namespace: platform
+spec:
+  # Target by name/glob, label selector, or both (union).
+  targetNamespaces:
+    - "team-*"
+  targetSelector:
+    matchLabels:
+      env: prod
+  excludeNamespaces:
+    - team-dev
+  sources:
+    - kind: Secret
+      name: shared-api-token
+      includeKeys: ["token"]          # optional whitelist
+    - kind: ConfigMap
+      name: app-config
+      excludeKeys: ["internal-notes"] # optional blacklist
+```
+
+The profile reconciler:
+- Creates/updates replicas in all matching namespaces as data changes.
+- Removes replicas from namespaces that no longer match (or when the profile is deleted).
+- Respects namespace `accept-from` consent annotations.
+- Reports `status.replicatedNamespaces`.
+
+Profile replicas carry `spillway.kroy.io/profile-ref` and are independent of annotation-based cleanup — the two mechanisms never interfere with each other.
 
 ## Deploy (Helm, recommended)
 
@@ -66,7 +129,7 @@ Replicas are marked with:
 ```bash
 # Pick a released chart version from:
 # https://github.com/kroy-the-rabbit/spillway/releases
-VERSION=0.2.5
+VERSION=0.3.0
 
 helm registry login ghcr.io
 helm install spillway oci://ghcr.io/kroy-the-rabbit/charts/spillway \
@@ -75,21 +138,21 @@ helm install spillway oci://ghcr.io/kroy-the-rabbit/charts/spillway \
   --create-namespace
 ```
 
+The chart installs the `SpillwayProfile` CRD by default (`installCRDs: true`). Set `--set installCRDs=false` if you manage CRDs separately.
+
 ### Upgrade from GHCR OCI chart
 
 ```bash
-# Reuse the same VERSION value used at install time.
 helm upgrade spillway oci://ghcr.io/kroy-the-rabbit/charts/spillway \
   --version "${VERSION}" \
-  --namespace spillway-system
+  --namespace spillway-system \
+  --reuse-values
 ```
 
 ### Install from local chart path
 
 ```bash
-# Pick a released app image tag from:
-# https://github.com/kroy-the-rabbit/spillway/releases
-VERSION=0.2.5
+VERSION=0.3.0
 
 helm install spillway ./charts/spillway \
   --namespace spillway-system \
@@ -103,7 +166,7 @@ helm install spillway ./charts/spillway \
 helm uninstall spillway --namespace spillway-system
 ```
 
-`helm uninstall` removes the controller, but it does not proactively remove previously created replicas. Remove source annotations before uninstall if you want Spillway to clean them up first.
+`helm uninstall` removes the controller, but does not proactively remove previously created replicas. Remove source annotations (or delete SpillwayProfile resources) before uninstall if you want Spillway to clean them up first.
 
 ## Production configuration
 
@@ -128,7 +191,7 @@ topologySpreadConstraints:
 
 ```bash
 helm upgrade --install spillway oci://ghcr.io/kroy-the-rabbit/charts/spillway \
-  --version 0.2.5 \
+  --version 0.3.0 \
   --namespace spillway-system \
   --create-namespace \
   -f values-prod.yaml
@@ -140,7 +203,7 @@ Enable `ServiceMonitor` (Prometheus Operator required):
 
 ```bash
 helm upgrade spillway oci://ghcr.io/kroy-the-rabbit/charts/spillway \
-  --version 0.2.5 \
+  --version 0.3.0 \
   --namespace spillway-system \
   --set metrics.serviceMonitor.enabled=true \
   --set metrics.serviceMonitor.labels.release=prometheus
@@ -150,7 +213,7 @@ helm upgrade spillway oci://ghcr.io/kroy-the-rabbit/charts/spillway \
 
 ```bash
 helm upgrade spillway oci://ghcr.io/kroy-the-rabbit/charts/spillway \
-  --version 0.2.5 \
+  --version 0.3.0 \
   --namespace spillway-system \
   --set networkPolicy.enabled=true
 ```
@@ -160,8 +223,9 @@ helm upgrade spillway oci://ghcr.io/kroy-the-rabbit/charts/spillway \
 | Key | Default | Description |
 |-----|---------|-------------|
 | `image.repository` | `ghcr.io/kroy-the-rabbit/spillway` | Controller image repository |
-| `image.tag` | chart `appVersion` | Image tag (`0.2.5` when appVersion is `0.2.5`) |
+| `image.tag` | chart `appVersion` | Image tag (`0.3.0` when appVersion is `0.3.0`) |
 | `replicaCount` | `2` | Number of controller replicas |
+| `installCRDs` | `true` | Install the SpillwayProfile CRD |
 | `controller.leaderElect` | `true` | Enable leader election |
 | `controller.syncPeriod` | `5m` | Full informer resync interval |
 | `controller.selfHealInterval` | `45s` | Per-source fallback requeue (`0` disables) |
@@ -175,7 +239,7 @@ See `charts/spillway/values.yaml` for full defaults.
 
 ## Deploy (Kustomize, simple/dev)
 
-`config/default` uses image tag `0.2.5` by default. Apply with:
+`config/default` uses image tag `0.3.0` by default. Apply with:
 
 ```bash
 kubectl apply -k config/default
@@ -185,7 +249,7 @@ kubectl apply -k config/default
 
 ```bash
 # Single-arch
-VERSION=0.2.5
+VERSION=0.3.0
 docker build --build-arg VERSION="${VERSION}" -t "ghcr.io/kroy-the-rabbit/spillway:${VERSION}" .
 
 # Multi-arch (requires docker buildx)
@@ -221,11 +285,11 @@ In addition to controller-runtime metrics, Spillway exports:
 ## Limitations
 
 - Spillway uses cluster-wide watches/lists for `Secrets`, `ConfigMaps`, and `Namespaces`; scope and permissions are cluster-level.
-- Cleanup is source-driven; if you uninstall without removing source annotations first, existing replicas remain.
+- Cleanup is source-driven; if you uninstall without removing source annotations or SpillwayProfile resources first, existing replicas remain.
 
 ## Versioning and releases
 
-- Version tags: `vMAJOR.MINOR.PATCH` (example: `v0.2.5`)
+- Version tags: `vMAJOR.MINOR.PATCH` (example: `v0.3.0`)
 - Pre-releases: `vMAJOR.MINOR.PATCH-rc.N`
 - Release tags trigger GitHub Actions automation for binaries, container image, Helm OCI chart, and GitHub release assets.
 - `charts/spillway/Chart.yaml` `version` and `appVersion` must match the release version (without leading `v`).

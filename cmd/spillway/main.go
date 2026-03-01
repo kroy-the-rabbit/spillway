@@ -16,6 +16,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
+	spillwayv1alpha1 "spillway/api/v1alpha1"
 	"spillway/internal/controller"
 )
 
@@ -51,6 +52,7 @@ func main() {
 	scheme := runtime.NewScheme()
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(corev1.AddToScheme(scheme))
+	utilruntime.Must(spillwayv1alpha1.AddToScheme(scheme))
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:                 scheme,
@@ -84,6 +86,17 @@ func main() {
 		SelfHealInterval: selfHealInterval,
 	}).SetupWithManager(mgr); err != nil {
 		ctrl.Log.Error(err, "unable to create configmap controller")
+		os.Exit(1)
+	}
+
+	if err := (&controller.ProfileReconciler{
+		Client:           mgr.GetClient(),
+		Scheme:           mgr.GetScheme(),
+		Log:              ctrl.Log.WithName("controllers").WithName("profile"),
+		Recorder:         mgr.GetEventRecorderFor("spillway"),
+		SelfHealInterval: selfHealInterval,
+	}).SetupWithManager(mgr); err != nil {
+		ctrl.Log.Error(err, "unable to create profile controller")
 		os.Exit(1)
 	}
 

@@ -40,7 +40,7 @@ func TestResolveTargetNamespaces_DefaultProtectedAndExclude(t *testing.T) {
 	include := parseTargetSelector("all")
 	exclude := parseTargetSelector("team-dev")
 
-	got, err := resolveTargetNamespaces(context.Background(), c, include, exclude, nil, "source")
+	got, err := resolveTargetNamespaces(context.Background(), c, include, exclude, nil, "source", "")
 	if err != nil {
 		t.Fatalf("resolve targets: %v", err)
 	}
@@ -67,7 +67,7 @@ func TestResolveTargetNamespaces_ExplicitKubeSystemOverride(t *testing.T) {
 		&corev1.Namespace{ObjectMeta: objectMeta("kube-system")},
 	).Build()
 
-	got, err := resolveTargetNamespaces(context.Background(), c, parseTargetSelector("kube-* , kube-system"), targetSelector{}, nil, "source")
+	got, err := resolveTargetNamespaces(context.Background(), c, parseTargetSelector("kube-* , kube-system"), targetSelector{}, nil, "source", "")
 	if err != nil {
 		t.Fatalf("resolve targets: %v", err)
 	}
@@ -93,7 +93,7 @@ func TestResolveTargetNamespaces_LabelSelector(t *testing.T) {
 		t.Fatalf("parse label selector: %v", err)
 	}
 
-	got, err := resolveTargetNamespaces(context.Background(), c, targetSelector{}, targetSelector{}, sel, "source")
+	got, err := resolveTargetNamespaces(context.Background(), c, targetSelector{}, targetSelector{}, sel, "source", "")
 	if err != nil {
 		t.Fatalf("resolve targets: %v", err)
 	}
@@ -120,7 +120,7 @@ func TestResolveTargetNamespaces_LabelSelectorWithExclude(t *testing.T) {
 	}
 	exclude := parseTargetSelector("team-b")
 
-	got, err := resolveTargetNamespaces(context.Background(), c, targetSelector{}, exclude, sel, "source")
+	got, err := resolveTargetNamespaces(context.Background(), c, targetSelector{}, exclude, sel, "source", "")
 	if err != nil {
 		t.Fatalf("resolve targets: %v", err)
 	}
@@ -148,7 +148,7 @@ func TestResolveTargetNamespaces_LabelAndNameUnion(t *testing.T) {
 	}
 	include := parseTargetSelector("explicit-ns")
 
-	got, err := resolveTargetNamespaces(context.Background(), c, include, targetSelector{}, sel, "source")
+	got, err := resolveTargetNamespaces(context.Background(), c, include, targetSelector{}, sel, "source", "")
 	if err != nil {
 		t.Fatalf("resolve targets: %v", err)
 	}
@@ -179,7 +179,7 @@ func TestResolveTargetNamespaces_LabelSelectorKubeSystemBypass(t *testing.T) {
 		t.Fatalf("parse label selector: %v", err)
 	}
 
-	got, err := resolveTargetNamespaces(context.Background(), c, targetSelector{}, targetSelector{}, sel, "source")
+	got, err := resolveTargetNamespaces(context.Background(), c, targetSelector{}, targetSelector{}, sel, "source", "")
 	if err != nil {
 		t.Fatalf("resolve targets: %v", err)
 	}

@@ -92,13 +92,15 @@ func (r *ConfigMapReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 	}
 
-	targets, err := resolveTargetNamespaces(ctx, r.Client, selector, excludeSelector, matchingSel, src.Namespace)
+	targets, err := resolveTargetNamespaces(ctx, r.Client, selector, excludeSelector, matchingSel, src.Namespace, src.Name)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
 	logTargetSync(log, desc, targets)
 
 	forceAdopt := isForceAdopt(&src)
+	kf := parseKeyFilter(&src)
+	_, hasTTL := parseReplicaTTL(&src)
 	desired := map[string]struct{}{}
 	changedCount := 0
 	skippedConflicts := 0
@@ -118,10 +120,21 @@ func (r *ConfigMapReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 				target.Labels = map[string]string{}
 			}
 			target.Labels[LabelManagedBy] = ManagedByValue
+			// Preserve existing expires-at before overwriting annotations.
+			existingExpiry := target.Annotations[AnnotationExpiresAt]
 			target.Annotations = desc.targetAnnotations(src.Annotations)
 			target.Immutable = ptrBool(src.Immutable)
-			target.Data = copyStringMap(src.Data)
-			target.BinaryData = copyByteMap(src.BinaryData)
+			target.Data = kf.applyString(src.Data)
+			target.BinaryData = kf.applyBytes(src.BinaryData)
+			// Stamp or preserve TTL expiry.
+			if hasTTL {
+				if existingExpiry != "" {
+					target.Annotations[AnnotationExpiresAt] = existingExpiry
+				} else {
+					ttl, _ := parseReplicaTTL(&src)
+					target.Annotations[AnnotationExpiresAt] = time.Now().Add(ttl).Format(time.RFC3339)
+				}
+			}
 			return nil
 		})
 		if syncErr != nil {
@@ -192,9 +205,13 @@ func (r *ConfigMapReconciler) cleanupReplicatedConfigMaps(ctx context.Context, d
 		if !matchesSource(cm, desc.kind, desc.namespace, desc.name) {
 			continue
 		}
+		// Keep if in desired set and not expired.
 		if keep != nil {
 			if _, ok := keep[cm.Namespace]; ok {
-				continue
+				if !replicaIsExpired(cm) {
+					continue
+				}
+				// Expired replica — fall through to delete.
 			}
 		}
 		if err := safeDelete(ctx, r.Client, cm); err != nil {

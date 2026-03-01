@@ -18,4 +18,13 @@ rules:
   - apiGroups: ["coordination.k8s.io"]
     resources: ["leases"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["spillway.kroy.io"]
+    resources: ["spillwayprofiles"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["spillway.kroy.io"]
+    resources: ["spillwayprofiles/status"]
+    verbs: ["get", "update", "patch"]
+  - apiGroups: ["spillway.kroy.io"]
+    resources: ["spillwayprofiles/finalizers"]
+    verbs: ["update"]
 

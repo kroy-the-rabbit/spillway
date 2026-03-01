@@ -1,0 +1,131 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: spillwayprofiles.spillway.kroy.io
+spec:
+  group: spillway.kroy.io
+  names:
+    kind: SpillwayProfile
+    listKind: SpillwayProfileList
+    plural: spillwayprofiles
+    singular: spillwayprofile
+    shortNames:
+      - swp
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: >
+            SpillwayProfile declaratively replicates a set of Secrets and ConfigMaps
+            from the profile's own namespace into any namespace matching the target rules.
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              type: object
+              required: ["sources"]
+              properties:
+                targetNamespaces:
+                  type: array
+                  description: >
+                    Explicit namespace names or glob patterns to replicate into.
+                    Union with targetSelector when both are set.
+                  items:
+                    type: string
+                targetSelector:
+                  type: object
+                  description: >
+                    Label selector for target namespaces. Union with targetNamespaces.
+                  properties:
+                    matchLabels:
+                      type: object
+                      additionalProperties:
+                        type: string
+                    matchExpressions:
+                      type: array
+                      items:
+                        type: object
+                        required: ["key", "operator"]
+                        properties:
+                          key:
+                            type: string
+                          operator:
+                            type: string
+                            enum: ["In", "NotIn", "Exists", "DoesNotExist"]
+                          values:
+                            type: array
+                            items:
+                              type: string
+                excludeNamespaces:
+                  type: array
+                  description: >
+                    Namespace names or glob patterns to exclude. Exclusions always win.
+                  items:
+                    type: string
+                sources:
+                  type: array
+                  description: >
+                    Secrets and ConfigMaps in the profile's namespace to replicate.
+                  minItems: 1
+                  items:
+                    type: object
+                    required: ["kind", "name"]
+                    properties:
+                      kind:
+                        type: string
+                        enum: ["Secret", "ConfigMap"]
+                        description: The type of resource to replicate.
+                      name:
+                        type: string
+                        description: Name of the source object in the profile's namespace.
+                      includeKeys:
+                        type: array
+                        description: >
+                          Whitelist of data keys to copy into replicas. Mutually exclusive
+                          with excludeKeys; includeKeys takes precedence.
+                        items:
+                          type: string
+                      excludeKeys:
+                        type: array
+                        description: Blacklist of data keys to omit from replicas.
+                        items:
+                          type: string
+            status:
+              type: object
+              properties:
+                replicatedNamespaces:
+                  type: array
+                  description: Namespaces currently receiving replicas from this profile.
+                  items:
+                    type: string
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    required: ["type", "status", "lastTransitionTime", "reason", "message"]
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                        enum: ["True", "False", "Unknown"]
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                      reason:
+                        type: string
+                      message:
+                        type: string
+                      observedGeneration:
+                        type: integer
+                        format: int64

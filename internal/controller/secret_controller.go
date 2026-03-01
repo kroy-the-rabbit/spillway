@@ -92,13 +92,15 @@ func (r *SecretReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		}
 	}
 
-	targets, err := resolveTargetNamespaces(ctx, r.Client, selector, excludeSelector, matchingSel, src.Namespace)
+	targets, err := resolveTargetNamespaces(ctx, r.Client, selector, excludeSelector, matchingSel, src.Namespace, src.Name)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
 	logTargetSync(log, desc, targets)
 
 	forceAdopt := isForceAdopt(&src)
+	kf := parseKeyFilter(&src)
+	_, hasTTL := parseReplicaTTL(&src)
 	desired := map[string]struct{}{}
 	changedCount := 0
 	skippedConflicts := 0
@@ -118,10 +120,21 @@ func (r *SecretReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 				target.Labels = map[string]string{}
 			}
 			target.Labels[LabelManagedBy] = ManagedByValue
+			// Preserve existing expires-at before overwriting annotations.
+			existingExpiry := target.Annotations[AnnotationExpiresAt]
 			target.Annotations = desc.targetAnnotations(src.Annotations)
 			target.Type = src.Type
 			target.Immutable = ptrBool(src.Immutable)
-			target.Data = copyByteMap(src.Data)
+			target.Data = kf.applyBytes(src.Data)
+			// Stamp or preserve TTL expiry.
+			if hasTTL {
+				if existingExpiry != "" {
+					target.Annotations[AnnotationExpiresAt] = existingExpiry
+				} else {
+					ttl, _ := parseReplicaTTL(&src)
+					target.Annotations[AnnotationExpiresAt] = time.Now().Add(ttl).Format(time.RFC3339)
+				}
+			}
 			return nil
 		})
 		if syncErr != nil {
@@ -192,9 +205,13 @@ func (r *SecretReconciler) cleanupReplicatedSecrets(ctx context.Context, desc so
 		if !matchesSource(s, desc.kind, desc.namespace, desc.name) {
 			continue
 		}
+		// Keep if in desired set and not expired.
 		if keep != nil {
 			if _, ok := keep[s.Namespace]; ok {
-				continue
+				if !replicaIsExpired(s) {
+					continue
+				}
+				// Expired replica — fall through to delete.
 			}
 		}
 		if err := safeDelete(ctx, r.Client, s); err != nil {

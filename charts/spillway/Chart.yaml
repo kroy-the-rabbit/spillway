@@ -4,8 +4,8 @@ description: >
   Replicates Kubernetes Secrets and ConfigMaps across namespaces in near real
   time using annotations on the source object.
 type: application
-version: 0.2.5
-appVersion: "0.2.5"
+version: 0.3.0
+appVersion: "0.3.0"
 keywords:
   - kubernetes
   - secrets
@@ -29,12 +29,14 @@ annotations:
     - name: Source
       url: https://github.com/kroy-the-rabbit/spillway
   artifacthub.io/changes: |
-    - kind: changed
-      description: README and docs website updated to match current controller behavior and deployment defaults
-    - kind: changed
-      description: Artifact Hub metadata aligned with published Pages website links and project icon
-    - kind: fixed
-      description: Artifact Hub repository logo URL now points to an existing icon asset
+    - kind: added
+      description: "SpillwayProfile CRD — declaratively replicate Secrets and ConfigMaps without annotating sources"
+    - kind: added
+      description: "Key projection: include-keys / exclude-keys annotations to whitelist or blacklist data keys on replicas"
+    - kind: added
+      description: "Replica TTL: replica-ttl annotation auto-expires and recreates replicas after a Go duration"
+    - kind: added
+      description: "Namespace consent: accept-from annotation on target Namespaces restricts which sources they accept"
   artifacthub.io/maintainers: |
     - name: kroy
       email: kroy@kroy.io

@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>spillway</title>
-  <meta name="description" content="Replicate Kubernetes Secrets and ConfigMaps across namespaces via annotations.">
+  <meta name="description" content="Replicate Kubernetes Secrets and ConfigMaps across namespaces via annotations or declarative profiles.">
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <style>
     :root {
@@ -15,6 +15,7 @@
       --muted:    #94a3b8;
       --accent:   #38bdf8;
       --code-bg:  #1e293b;
+      --green:    #4ade80;
     }
 
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -61,7 +62,7 @@
     .tagline {
       color: var(--muted);
       font-size: 1.05rem;
-      max-width: 480px;
+      max-width: 520px;
     }
 
     /* ── Sections ── */
@@ -78,6 +79,14 @@
       color: var(--muted);
       margin-bottom: 1rem;
     }
+
+    h3 {
+      font-size: 1rem;
+      font-weight: 700;
+      color: var(--text);
+      margin: 1.4rem 0 0.5rem;
+    }
+    h3:first-child { margin-top: 0; }
 
     p { margin-bottom: 0.9rem; }
     p:last-child { margin-bottom: 0; }
@@ -110,6 +119,46 @@
       padding: 0;
       font-size: 0.875rem;
       color: var(--text);
+    }
+
+    /* ── Feature cards ── */
+    .features {
+      display: grid;
+      gap: 0.75rem;
+      margin-top: 0.5rem;
+    }
+
+    .feature {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem 1.2rem;
+    }
+
+    .feature-title {
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: 0.2rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .feature-title .pill {
+      font-size: 0.65rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      background: #0c4a6e;
+      color: var(--accent);
+      border-radius: 20px;
+      padding: 0.1em 0.55em;
+    }
+
+    .feature p {
+      color: var(--muted);
+      font-size: 0.9rem;
+      margin-bottom: 0;
     }
 
     /* ── Annotation table ── */
@@ -187,28 +236,53 @@
   <header>
     <img src="favicon.svg" alt="spillway logo" width="88" height="88">
     <h1>spillway</h1>
-    <p class="tagline">replicate Kubernetes Secrets and ConfigMaps across namespaces via annotations</p>
+    <p class="tagline">replicate Kubernetes Secrets and ConfigMaps across namespaces — via annotations or declarative profiles</p>
   </header>
 
   <section>
     <h2>Install</h2>
-    <pre><code># replace 0.2.5 with your target release
-helm install spillway oci://ghcr.io/kroy-the-rabbit/charts/spillway \
-  --version 0.2.5 \
+    <pre><code>helm install spillway oci://ghcr.io/kroy-the-rabbit/charts/spillway \
+  --version 0.3.0 \
   --namespace spillway-system \
   --create-namespace</code></pre>
-    <p>Requires Kubernetes 1.25+ and Helm 3.10+. The chart is published to GHCR as an OCI artifact — no <code>helm repo add</code> needed.</p>
+    <p>Requires Kubernetes 1.25+ and Helm 3.10+. The chart is published to GHCR as an OCI artifact — no <code>helm repo add</code> needed. The <code>SpillwayProfile</code> CRD is installed automatically.</p>
   </section>
 
   <section>
     <h2>The idea</h2>
     <p>You have a <code>Secret</code> in <code>platform</code> and every one of your tenant namespaces needs a copy. Copy-pasting YAML doesn't scale, and writing a script to keep them in sync is exactly as fun as it sounds.</p>
-    <p>Spillway watches your cluster. Add one annotation to a source object, and it handles creation, updates, and cleanup across whatever namespaces you target — by name, glob, or label selector.</p>
+    <p>Spillway watches your cluster and handles creation, updates, and cleanup automatically. Annotate a single source object, or use a <code>SpillwayProfile</code> to manage entire sets of objects declaratively — no annotations on the sources required.</p>
   </section>
 
   <section>
-    <h2>Usage</h2>
-    <p>Annotate a source object:</p>
+    <h2>Features</h2>
+    <div class="features">
+      <div class="feature">
+        <div class="feature-title">Annotation-driven replication</div>
+        <p>Add one annotation to any Secret or ConfigMap. Replicate to explicit namespaces, glob patterns, or by label selector. Mix and match freely.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-title">SpillwayProfile CRD <span class="pill">new in 0.3</span></div>
+        <p>Declaratively replicate a set of Secrets and ConfigMaps without touching the source objects. Ideal for platform bootstrap and GitOps workflows.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-title">Key projection <span class="pill">new in 0.3</span></div>
+        <p>Whitelist or blacklist specific data keys per replica. Give tenants only the keys they need — keep the rest private.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-title">Replica TTL <span class="pill">new in 0.3</span></div>
+        <p>Set a lifetime on replicas with a Go duration (e.g. <code>24h</code>). Expired replicas are deleted automatically and recreated with a fresh TTL on the next reconcile.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-title">Namespace consent <span class="pill">new in 0.3</span></div>
+        <p>Annotate a target namespace to restrict which sources it accepts. Opt in to specific namespaces, specific objects, or leave it open.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Annotation-driven usage</h2>
+    <p>Annotate a source object and spillway does the rest:</p>
     <pre><code>apiVersion: v1
 kind: Secret
 metadata:
@@ -216,24 +290,58 @@ metadata:
   namespace: platform
   annotations:
     spillway.kroy.io/replicate-to: "team-*,prod"
+    spillway.kroy.io/include-keys: "token"   # only copy this key
 type: Opaque
 stringData:
-  token: hunter2</code></pre>
-    <p>Spillway reconciles <code>shared-api-token</code> into every <code>team-*</code> namespace and into <code>prod</code>. It keeps them up to date as the source changes, and deletes them if the annotation is removed or the source is deleted.</p>
-    <p>ConfigMaps work exactly the same way.</p>
-    <pre><code>apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: app-settings
-  namespace: platform
-  annotations:
-    spillway.kroy.io/replicate-to: "team-*"
-    spillway.kroy.io/exclude-namespaces: "team-dev"
-data:
-  LOG_LEVEL: info</code></pre>
-    <p>You can also target by namespace label rather than name:</p>
+  token: hunter2
+  internal-notes: do not distribute</code></pre>
+    <p>ConfigMaps work exactly the same way. You can target by namespace label instead of name:</p>
     <pre><code>  annotations:
-    spillway.kroy.io/replicate-to-matching: "env=prod"</code></pre>
+    spillway.kroy.io/replicate-to-matching: "env=prod"
+    spillway.kroy.io/exclude-namespaces: "team-dev"
+    spillway.kroy.io/replica-ttl: "24h"    # auto-expire after 24 hours</code></pre>
+  </section>
+
+  <section>
+    <h2>SpillwayProfile</h2>
+    <p>Define replication policy independently of the source objects. No annotations required on the source:</p>
+    <pre><code>apiVersion: spillway.kroy.io/v1alpha1
+kind: SpillwayProfile
+metadata:
+  name: platform-secrets
+  namespace: platform
+spec:
+  targetNamespaces:
+    - "team-*"
+  targetSelector:
+    matchLabels:
+      env: prod
+  excludeNamespaces:
+    - team-dev
+  sources:
+    - kind: Secret
+      name: shared-api-token
+      includeKeys: ["token"]
+    - kind: ConfigMap
+      name: app-config
+      excludeKeys: ["internal-notes"]</code></pre>
+    <p>The profile reconciler creates and updates replicas as sources change, removes replicas from namespaces that no longer match, and cleans up everything when the profile is deleted.</p>
+  </section>
+
+  <section>
+    <h2>Namespace consent</h2>
+    <p>Annotate a target namespace to control which sources it will accept:</p>
+    <pre><code>apiVersion: v1
+kind: Namespace
+metadata:
+  name: payments
+  annotations:
+    # Accept from the platform namespace only (any object)
+    spillway.kroy.io/accept-from: "platform"
+
+    # Or restrict to a specific object
+    # spillway.kroy.io/accept-from: "platform:api-token"</code></pre>
+    <p>Absent annotation means accept from all sources — existing clusters are unaffected by default.</p>
   </section>
 
   <section>
@@ -248,32 +356,47 @@ data:
         </thead>
         <tbody>
           <tr>
-            <td><code>spillway.kroy.io/replicate-to</code></td>
-            <td>Comma-separated targets. Accepts <code>all</code>, glob patterns like <code>team-*</code>, or explicit namespace names. Mix freely.</td>
+            <td><code>replicate-to</code></td>
+            <td>Comma-separated targets. Accepts <code>all</code>, globs like <code>team-*</code>, or explicit names. Mix freely.</td>
           </tr>
           <tr>
-            <td><code>spillway.kroy.io/replicate-to-matching</code></td>
-            <td>Label selector targeting. E.g. <code>env=prod</code> or <code>tier=frontend,region=us</code>. Resolved at reconcile time.</td>
+            <td><code>replicate-to-matching</code></td>
+            <td>Label selector targeting. E.g. <code>env=prod</code>. Resolved at reconcile time.</td>
           </tr>
           <tr>
-            <td><code>spillway.kroy.io/exclude-namespaces</code></td>
+            <td><code>exclude-namespaces</code></td>
             <td>Comma-separated exclusions, same syntax as <code>replicate-to</code>. Always wins over includes.</td>
           </tr>
           <tr>
-            <td><code>spillway.kroy.io/force-adopt</code></td>
-            <td>Set to <code>"true"</code> to take ownership of a pre-existing unmanaged object with the same name instead of skipping it.</td>
+            <td><code>include-keys</code></td>
+            <td>Comma-separated data key whitelist. Only listed keys are copied. Mutually exclusive with <code>exclude-keys</code>.</td>
+          </tr>
+          <tr>
+            <td><code>exclude-keys</code></td>
+            <td>Comma-separated data key blacklist. Listed keys are omitted from replicas.</td>
+          </tr>
+          <tr>
+            <td><code>replica-ttl</code></td>
+            <td>Go duration (e.g. <code>24h</code>, <code>7d</code>). Replicas expire after this duration from their creation and are recreated with a fresh TTL on the next reconcile.</td>
+          </tr>
+          <tr>
+            <td><code>force-adopt</code></td>
+            <td>Set to <code>"true"</code> to take ownership of a pre-existing unmanaged object instead of skipping it.</td>
+          </tr>
+          <tr>
+            <td><code>accept-from</code> <em>(on Namespace)</em></td>
+            <td>Comma-separated source allowlist: <code>"platform"</code>, <code>"platform:token"</code>, <code>"all"</code>, or <code>"*"</code>.</td>
           </tr>
         </tbody>
       </table>
     </div>
-    <p class="note"><code>kube-system</code> is excluded by default when using <code>all</code> or wildcards. Explicitly naming it overrides that.</p>
+    <p class="note">All annotation keys are prefixed <code>spillway.kroy.io/</code>. <code>kube-system</code> is excluded by default when using <code>all</code> or wildcards — explicitly naming it overrides that.</p>
   </section>
 
   <section>
     <h2>Upgrade</h2>
-    <pre><code># replace 0.2.5 with your target release
-helm upgrade spillway oci://ghcr.io/kroy-the-rabbit/charts/spillway \
-  --version 0.2.5 \
+    <pre><code>helm upgrade spillway oci://ghcr.io/kroy-the-rabbit/charts/spillway \
+  --version 0.3.0 \
   --namespace spillway-system \
   --reuse-values</code></pre>
   </section>
