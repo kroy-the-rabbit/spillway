@@ -242,7 +242,7 @@
   <section>
     <h2>Install</h2>
     <pre><code>helm install spillway oci://ghcr.io/kroy-the-rabbit/charts/spillway \
-  --version 0.3.0 \
+  --version 0.3.1 \
   --namespace spillway-system \
   --create-namespace</code></pre>
     <p>Requires Kubernetes 1.25+ and Helm 3.10+. The chart is published to GHCR as an OCI artifact — no <code>helm repo add</code> needed. The <code>SpillwayProfile</code> CRD is installed automatically.</p>
@@ -396,7 +396,7 @@ metadata:
   <section>
     <h2>Upgrade</h2>
     <pre><code>helm upgrade spillway oci://ghcr.io/kroy-the-rabbit/charts/spillway \
-  --version 0.3.0 \
+  --version 0.3.1 \
   --namespace spillway-system \
   --reuse-values</code></pre>
   </section>
