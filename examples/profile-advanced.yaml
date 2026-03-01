@@ -1,0 +1,58 @@
+# Advanced SpillwayProfile — per-source key projection and multi-tier targeting.
+#
+# This example shows a profile used by a security team to distribute different
+# views of the same credentials to different tiers of namespaces:
+#   - All "app-*" namespaces get a read-only token.
+#   - Namespaces labelled "tier=ops" get the full admin token as well.
+# Two separate profiles achieve this; each profile controls its own scope.
+
+# --- Profile 1: read-only access for all app namespaces ---
+apiVersion: spillway.kroy.io/v1alpha1
+kind: SpillwayProfile
+metadata:
+  name: app-readonly
+  namespace: security
+spec:
+  targetNamespaces:
+    - "app-*"
+  sources:
+    - kind: Secret
+      name: service-credentials
+      # Whitelist: only the read-only token reaches app namespaces.
+      includeKeys:
+        - readonly-token
+        - ca-cert
+
+---
+# --- Profile 2: full access for ops namespaces ---
+apiVersion: spillway.kroy.io/v1alpha1
+kind: SpillwayProfile
+metadata:
+  name: ops-full-access
+  namespace: security
+spec:
+  targetSelector:
+    matchLabels:
+      tier: ops
+  # Even within ops-tier namespaces, exclude the most sensitive rotation key.
+  sources:
+    - kind: Secret
+      name: service-credentials
+      excludeKeys:
+        - rotation-key
+    - kind: ConfigMap
+      name: ops-runbook-config
+
+---
+# The source Secret (no annotations needed — the profiles drive replication).
+apiVersion: v1
+kind: Secret
+metadata:
+  name: service-credentials
+  namespace: security
+type: Opaque
+stringData:
+  readonly-token: read-only-value
+  admin-token: admin-value
+  ca-cert: "-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----"
+  rotation-key: ultra-secret-rotation-key

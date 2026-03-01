@@ -100,12 +100,42 @@ func (r *ConfigMapReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	forceAdopt := isForceAdopt(&src)
 	kf := parseKeyFilter(&src)
-	_, hasTTL := parseReplicaTTL(&src)
+	ttl, hasTTL := parseReplicaTTL(&src)
+
+	// If TTL was removed, clear any previously recorded expired namespaces.
+	if !hasTTL && src.Annotations[AnnotationExpiredNamespaces] != "" {
+		ann := copyStringMap(src.Annotations)
+		delete(ann, AnnotationExpiredNamespaces)
+		src.SetAnnotations(ann)
+		if err := r.Update(ctx, &src); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{Requeue: true}, nil
+	}
+
+	expiredNS := parseExpiredNamespaces(&src)
+	var newlyExpired []string
+
 	desired := map[string]struct{}{}
 	changedCount := 0
 	skippedConflicts := 0
 	var errs []error
 	for _, ns := range targets {
+		// Skip namespaces where the TTL has already permanently expired.
+		if hasTTL {
+			if _, ok := expiredNS[ns]; ok {
+				continue
+			}
+			// Check if an existing replica has just expired.
+			var existing corev1.ConfigMap
+			if err := r.Get(ctx, client.ObjectKey{Namespace: ns, Name: src.Name}, &existing); err == nil {
+				if replicaIsExpired(&existing) {
+					newlyExpired = append(newlyExpired, ns)
+					continue // leave out of desired; cleanup will delete it
+				}
+			}
+		}
+
 		desired[ns] = struct{}{}
 
 		target := &corev1.ConfigMap{}
@@ -131,7 +161,6 @@ func (r *ConfigMapReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 				if existingExpiry != "" {
 					target.Annotations[AnnotationExpiresAt] = existingExpiry
 				} else {
-					ttl, _ := parseReplicaTTL(&src)
 					target.Annotations[AnnotationExpiresAt] = time.Now().Add(ttl).Format(time.RFC3339)
 				}
 			}
@@ -160,6 +189,20 @@ func (r *ConfigMapReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		errs = append(errs, err)
 	} else {
 		changedCount += deletedCount
+	}
+
+	// Persist newly expired namespaces on the source so they are skipped on
+	// future reconciles and not recreated.
+	if len(newlyExpired) > 0 {
+		for _, ns := range newlyExpired {
+			expiredNS[ns] = struct{}{}
+		}
+		ann := copyStringMap(src.Annotations)
+		ann[AnnotationExpiredNamespaces] = formatNamespaceSet(expiredNS)
+		src.SetAnnotations(ann)
+		if updateErr := r.Update(ctx, &src); updateErr != nil {
+			errs = append(errs, updateErr)
+		}
 	}
 
 	if len(errs) == 0 {
@@ -205,13 +248,9 @@ func (r *ConfigMapReconciler) cleanupReplicatedConfigMaps(ctx context.Context, d
 		if !matchesSource(cm, desc.kind, desc.namespace, desc.name) {
 			continue
 		}
-		// Keep if in desired set and not expired.
 		if keep != nil {
 			if _, ok := keep[cm.Namespace]; ok {
-				if !replicaIsExpired(cm) {
-					continue
-				}
-				// Expired replica — fall through to delete.
+				continue
 			}
 		}
 		if err := safeDelete(ctx, r.Client, cm); err != nil {

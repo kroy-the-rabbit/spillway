@@ -271,7 +271,7 @@
       </div>
       <div class="feature">
         <div class="feature-title">Replica TTL <span class="pill">new in 0.3</span></div>
-        <p>Set a lifetime on replicas with a Go duration (e.g. <code>24h</code>). Expired replicas are deleted automatically and recreated with a fresh TTL on the next reconcile.</p>
+        <p>Set a lifetime on replicas with a Go duration (e.g. <code>24h</code>). Expired replicas are <strong>permanently deleted</strong> — not recreated. Perfect for temporary access grants and maintenance windows.</p>
       </div>
       <div class="feature">
         <div class="feature-title">Namespace consent <span class="pill">new in 0.3</span></div>
@@ -299,7 +299,7 @@ stringData:
     <pre><code>  annotations:
     spillway.kroy.io/replicate-to-matching: "env=prod"
     spillway.kroy.io/exclude-namespaces: "team-dev"
-    spillway.kroy.io/replica-ttl: "24h"    # auto-expire after 24 hours</code></pre>
+    spillway.kroy.io/replica-ttl: "24h"    # permanently expire after 24 hours</code></pre>
   </section>
 
   <section>
@@ -330,17 +330,17 @@ spec:
 
   <section>
     <h2>Namespace consent</h2>
-    <p>Annotate a target namespace to control which sources it will accept:</p>
+    <p>Annotate a target namespace to control which sources it will accept. Format: <code>Kind/namespace/name</code> with wildcard (<code>*</code>) support in each segment.</p>
     <pre><code>apiVersion: v1
 kind: Namespace
 metadata:
   name: payments
   annotations:
-    # Accept from the platform namespace only (any object)
-    spillway.kroy.io/accept-from: "platform"
+    # Accept any Secret from the platform namespace, plus one specific ConfigMap
+    spillway.kroy.io/accept-from: "Secret/platform/*,ConfigMap/ops/app-config"
 
-    # Or restrict to a specific object
-    # spillway.kroy.io/accept-from: "platform:api-token"</code></pre>
+    # Or accept everything from the platform namespace (any kind)
+    # spillway.kroy.io/accept-from: "*/platform/*"</code></pre>
     <p>Absent annotation means accept from all sources — existing clusters are unaffected by default.</p>
   </section>
 
@@ -377,7 +377,7 @@ metadata:
           </tr>
           <tr>
             <td><code>replica-ttl</code></td>
-            <td>Go duration (e.g. <code>24h</code>, <code>7d</code>). Replicas expire after this duration from their creation and are recreated with a fresh TTL on the next reconcile.</td>
+            <td>Go duration (e.g. <code>24h</code>, <code>168h</code>). Replicas are <strong>permanently deleted</strong> once the TTL elapses — not recreated. The expired namespace is recorded in <code>expired-namespaces</code> on the source. Remove that annotation entry to re-enable.</td>
           </tr>
           <tr>
             <td><code>force-adopt</code></td>
@@ -385,7 +385,7 @@ metadata:
           </tr>
           <tr>
             <td><code>accept-from</code> <em>(on Namespace)</em></td>
-            <td>Comma-separated source allowlist: <code>"platform"</code>, <code>"platform:token"</code>, <code>"all"</code>, or <code>"*"</code>.</td>
+            <td>Comma-separated allowlist in <code>Kind/namespace/name</code> format with <code>*</code> wildcards. E.g. <code>Secret/platform/*</code>, <code>*/platform/*</code>, <code>all</code>.</td>
           </tr>
         </tbody>
       </table>

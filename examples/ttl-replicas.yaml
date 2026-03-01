@@ -1,0 +1,39 @@
+# TTL replicas — replicas are permanently deleted once their TTL elapses.
+#
+# After the TTL expires the replica is removed and the namespace is recorded
+# in the "spillway.kroy.io/expired-namespaces" annotation on the source.
+# Spillway will never recreate the replica for that namespace unless:
+#   - The annotation entry for that namespace is manually removed, OR
+#   - The replica-ttl annotation is removed entirely (clears all expired records).
+#
+# Valid Go duration strings: 1h, 24h, 7d (no days unit — use 168h), 30m, etc.
+# Standard units: ns, us, ms, s, m, h
+
+# Temporary access token — replicas expire after 8 hours.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: temp-access-token
+  namespace: platform
+  annotations:
+    spillway.kroy.io/replicate-to: "staging"
+    spillway.kroy.io/replica-ttl: "8h"
+type: Opaque
+stringData:
+  token: short-lived-token-value
+
+---
+# Scheduled config that should stop propagating after a maintenance window.
+# Replicas expire after 2 hours; after that each target namespace is recorded
+# as permanently expired.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: maintenance-config
+  namespace: ops
+  annotations:
+    spillway.kroy.io/replicate-to: "all"
+    spillway.kroy.io/replica-ttl: "2h"
+data:
+  MAINTENANCE_MODE: "true"
+  REDIRECT_URL: https://status.example.com

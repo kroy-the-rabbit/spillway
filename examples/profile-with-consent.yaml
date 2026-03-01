@@ -1,0 +1,51 @@
+# SpillwayProfile + namespace consent — tenant opt-in model.
+#
+# Namespaces can restrict which profiles (and direct-annotation sources) may
+# replicate into them via the "accept-from" annotation. Combined with a
+# SpillwayProfile this creates a pull-based consent model:
+#   - The platform team defines what CAN be replicated via a SpillwayProfile.
+#   - Each tenant namespace opts in by annotating itself.
+#
+# Profile sources appear in accept-from as:
+#   Kind/profileNamespace/sourceName
+# The same format used for direct-annotation sources.
+
+# Platform profile — offers a shared TLS bundle and registry pull secret.
+apiVersion: spillway.kroy.io/v1alpha1
+kind: SpillwayProfile
+metadata:
+  name: platform-bundle
+  namespace: platform
+spec:
+  # Wildcard: offer to all namespaces; consent annotation controls who gets it.
+  targetNamespaces:
+    - "*"
+  excludeNamespaces:
+    - kube-system
+    - kube-public
+    - spillway-system
+  sources:
+    - kind: Secret
+      name: registry-pull-secret
+    - kind: ConfigMap
+      name: tls-bundle
+
+---
+# Tenant namespace that opts in to the registry pull secret only.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: team-payments
+  annotations:
+    # Accept the registry pull Secret from the platform namespace.
+    # The TLS ConfigMap is NOT accepted — it will not be replicated here.
+    spillway.kroy.io/accept-from: "Secret/platform/registry-pull-secret"
+
+---
+# Tenant namespace that opts in to everything the platform profile offers.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: team-core
+  annotations:
+    spillway.kroy.io/accept-from: "*/platform/*"

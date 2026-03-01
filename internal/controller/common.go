@@ -50,6 +50,12 @@ const (
 	// carries AnnotationReplicaTTL. RFC3339 timestamp.
 	AnnotationExpiresAt = "spillway.kroy.io/expires-at"
 
+	// AnnotationExpiredNamespaces is maintained by the controller on source objects.
+	// It records the namespaces where replicas have permanently expired (TTL elapsed).
+	// The controller skips these namespaces on future reconciles. Remove a namespace
+	// from this annotation (or clear it entirely) to re-enable replication there.
+	AnnotationExpiredNamespaces = "spillway.kroy.io/expired-namespaces"
+
 	AnnotationManagedBy  = "spillway.kroy.io/managed-by"
 	AnnotationSourceFrom = "spillway.kroy.io/source-from"
 
@@ -252,6 +258,32 @@ func parseReplicaTTL(obj metav1.Object) (time.Duration, bool) {
 		return 0, false
 	}
 	return d, true
+}
+
+// parseExpiredNamespaces returns the set of namespaces recorded in the
+// AnnotationExpiredNamespaces annotation on a source object.
+func parseExpiredNamespaces(obj metav1.Object) map[string]struct{} {
+	raw := obj.GetAnnotations()[AnnotationExpiredNamespaces]
+	if raw == "" {
+		return map[string]struct{}{}
+	}
+	m := map[string]struct{}{}
+	for _, ns := range strings.Split(raw, ",") {
+		if ns = strings.TrimSpace(ns); ns != "" {
+			m[ns] = struct{}{}
+		}
+	}
+	return m
+}
+
+// formatNamespaceSet serialises a namespace set as a sorted comma-separated string.
+func formatNamespaceSet(m map[string]struct{}) string {
+	ns := make([]string, 0, len(m))
+	for n := range m {
+		ns = append(ns, n)
+	}
+	sort.Strings(ns)
+	return strings.Join(ns, ",")
 }
 
 // replicaIsExpired returns true if the replica's expires-at annotation is in the past.

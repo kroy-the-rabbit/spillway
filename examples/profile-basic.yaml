@@ -1,0 +1,49 @@
+# SpillwayProfile — declarative replication policy without source annotations.
+#
+# A SpillwayProfile lives in the namespace that owns the source Secrets and
+# ConfigMaps. It defines which objects to replicate, where to send them, and
+# which keys to include or exclude — all in one resource. No annotations are
+# needed on the source objects themselves.
+#
+# This is the recommended approach for platform teams managing shared secrets
+# across many namespaces.
+
+# Prerequisites: the following objects must exist in the "platform" namespace.
+#
+#   kubectl create secret generic registry-pull-secret \
+#     --namespace platform \
+#     --from-literal=.dockerconfigjson='...'
+#
+#   kubectl create configmap shared-env \
+#     --namespace platform \
+#     --from-literal=LOG_LEVEL=info \
+#     --from-literal=SENTRY_DSN=https://...
+
+apiVersion: spillway.kroy.io/v1alpha1
+kind: SpillwayProfile
+metadata:
+  name: platform-defaults
+  namespace: platform
+spec:
+  # Replicate into all namespaces whose names start with "team-".
+  targetNamespaces:
+    - "team-*"
+
+  # Also replicate into namespaces labelled "environment=production".
+  targetSelector:
+    matchLabels:
+      environment: production
+
+  # Never replicate into these namespaces regardless of the rules above.
+  excludeNamespaces:
+    - "team-legacy"
+
+  sources:
+    - kind: Secret
+      name: registry-pull-secret
+
+    - kind: ConfigMap
+      name: shared-env
+      # Only copy safe keys — exclude the Sentry DSN from most tenants.
+      excludeKeys:
+        - SENTRY_DSN

@@ -1,0 +1,37 @@
+# Key projection — share only a subset of keys with target namespaces.
+#
+# A single Secret might hold many credentials, but tenants only need
+# a read-only token. Use include-keys to expose only what is needed,
+# or exclude-keys to strip internal/sensitive fields before replication.
+
+# --- Include-keys: whitelist ---
+# Only the "readonly-token" key is copied into replicas.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: service-credentials
+  namespace: platform
+  annotations:
+    spillway.kroy.io/replicate-to: "all"
+    spillway.kroy.io/include-keys: "readonly-token"
+type: Opaque
+stringData:
+  readonly-token: read-only-value
+  admin-token: super-secret         # NOT replicated
+  internal-key: another-secret      # NOT replicated
+
+---
+# --- Exclude-keys: blacklist ---
+# Everything except "internal-debug-token" is copied into replicas.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: platform
+  annotations:
+    spillway.kroy.io/replicate-to: "team-*"
+    spillway.kroy.io/exclude-keys: "internal-debug-token"
+data:
+  DATABASE_URL: postgres://db:5432/app
+  CACHE_TTL: "300"
+  internal-debug-token: do-not-share  # NOT replicated

@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -210,6 +211,129 @@ func TestConfigMapReconcileSmoke_InvalidMatchingSelectorDoesNotError(t *testing.
 	r := &ConfigMapReconciler{Client: c, Scheme: scheme, Log: log.Log.WithName("test"), Recorder: record.NewFakeRecorder(100)}
 	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "platform", Name: "shared-config"}}); err != nil {
 		t.Fatalf("expected invalid selector to be handled without reconcile error, got: %v", err)
+	}
+}
+
+// TestConfigMapReconcileSmoke_TTLExpiry verifies that when an existing replica's
+// expires-at annotation is in the past, the controller marks the namespace as
+// permanently expired and removes the replica — not recreating it.
+func TestConfigMapReconcileSmoke_TTLExpiry(t *testing.T) {
+	ctx := context.Background()
+
+	expiredTime := time.Now().Add(-1 * time.Hour).Format(time.RFC3339)
+
+	expiredReplica := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "app-config",
+			Namespace: "team-a",
+			Annotations: map[string]string{
+				AnnotationManagedBy:  ManagedByValue,
+				AnnotationSourceFrom: "ConfigMap/platform/app-config",
+				AnnotationExpiresAt:  expiredTime,
+			},
+			Labels: map[string]string{LabelManagedBy: ManagedByValue},
+		},
+	}
+	src := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "app-config",
+			Namespace: "platform",
+			Annotations: map[string]string{
+				AnnotationReplicateTo: "team-a",
+				AnnotationReplicaTTL:  "24h",
+			},
+		},
+		Data: map[string]string{"key": "value"},
+	}
+
+	c, scheme := newCMSmokeClient(t,
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "platform"}},
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "team-a"}},
+		src,
+		expiredReplica,
+	)
+
+	r := &ConfigMapReconciler{Client: c, Scheme: scheme, Log: log.Log.WithName("test"), Recorder: record.NewFakeRecorder(100)}
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "platform", Name: "app-config"}}
+
+	// First reconcile: detects expiry, removes replica, records team-a as expired.
+	if _, err := r.Reconcile(ctx, req); err != nil {
+		t.Fatalf("first reconcile: %v", err)
+	}
+
+	var replica corev1.ConfigMap
+	if err := c.Get(ctx, client.ObjectKey{Namespace: "team-a", Name: "app-config"}, &replica); !apierrors.IsNotFound(err) {
+		t.Fatalf("expected expired replica to be deleted, got err=%v", err)
+	}
+
+	var updatedSrc corev1.ConfigMap
+	if err := c.Get(ctx, client.ObjectKey{Namespace: "platform", Name: "app-config"}, &updatedSrc); err != nil {
+		t.Fatalf("get source: %v", err)
+	}
+	if updatedSrc.Annotations[AnnotationExpiredNamespaces] == "" {
+		t.Fatal("expected expired-namespaces annotation to be set on source")
+	}
+
+	// Second reconcile: team-a is in expired set, so no replica is created.
+	if _, err := r.Reconcile(ctx, req); err != nil {
+		t.Fatalf("second reconcile: %v", err)
+	}
+	if err := c.Get(ctx, client.ObjectKey{Namespace: "team-a", Name: "app-config"}, &replica); !apierrors.IsNotFound(err) {
+		t.Fatalf("expected no recreation of expired replica, got err=%v", err)
+	}
+}
+
+// TestConfigMapReconcileSmoke_TTLRemovalClearsExpiredNamespaces verifies that
+// removing the replica-ttl annotation causes the controller to clear the
+// expired-namespaces annotation and requeue so replication resumes.
+func TestConfigMapReconcileSmoke_TTLRemovalClearsExpiredNamespaces(t *testing.T) {
+	ctx := context.Background()
+
+	src := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "app-config",
+			Namespace: "platform",
+			Annotations: map[string]string{
+				AnnotationReplicateTo:       "team-a",
+				AnnotationExpiredNamespaces: "team-a",
+				// No AnnotationReplicaTTL — TTL was removed.
+			},
+		},
+		Data: map[string]string{"key": "value"},
+	}
+
+	c, scheme := newCMSmokeClient(t,
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "platform"}},
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "team-a"}},
+		src,
+	)
+
+	r := &ConfigMapReconciler{Client: c, Scheme: scheme, Log: log.Log.WithName("test"), Recorder: record.NewFakeRecorder(100)}
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "platform", Name: "app-config"}}
+
+	result, err := r.Reconcile(ctx, req)
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if !result.Requeue {
+		t.Fatal("expected Requeue=true after clearing expired-namespaces")
+	}
+
+	var updatedSrc corev1.ConfigMap
+	if err := c.Get(ctx, client.ObjectKey{Namespace: "platform", Name: "app-config"}, &updatedSrc); err != nil {
+		t.Fatalf("get source: %v", err)
+	}
+	if ann := updatedSrc.Annotations[AnnotationExpiredNamespaces]; ann != "" {
+		t.Fatalf("expected expired-namespaces to be cleared, got %q", ann)
+	}
+
+	// Second reconcile: replica should now be created.
+	if _, err := r.Reconcile(ctx, req); err != nil {
+		t.Fatalf("second reconcile: %v", err)
+	}
+	var replica corev1.ConfigMap
+	if err := c.Get(ctx, client.ObjectKey{Namespace: "team-a", Name: "app-config"}, &replica); err != nil {
+		t.Fatalf("expected replica to be created after TTL removal: %v", err)
 	}
 }
 

@@ -1,0 +1,56 @@
+# Label selector targeting — replicate to namespaces matching a label query.
+#
+# Use "replicate-to-matching" when you want replication to track namespace
+# labels dynamically. New namespaces with the matching labels automatically
+# receive replicas; removing a label stops replication and cleans up the replica.
+#
+# Selector syntax follows Kubernetes label selector conventions:
+#   key=value          equality
+#   key!=value         inequality
+#   key in (a,b)       set membership
+#   key notin (a,b)    set exclusion
+#   key                existence check
+# Multiple selectors can be combined with commas (AND logic).
+
+# Replicate the Docker registry pull secret to every namespace labelled
+# "environment=production".
+apiVersion: v1
+kind: Secret
+metadata:
+  name: registry-pull-secret
+  namespace: platform
+  annotations:
+    spillway.kroy.io/replicate-to-matching: "environment=production"
+type: kubernetes.io/dockerconfigjson
+stringData:
+  .dockerconfigjson: '{"auths":{"ghcr.io":{"auth":"replace-me"}}}'
+
+---
+# Replicate a shared TLS ConfigMap to all namespaces that have both
+# "tier=frontend" and "region=us-east-1".
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tls-config
+  namespace: infra
+  annotations:
+    spillway.kroy.io/replicate-to-matching: "tier=frontend,region=us-east-1"
+data:
+  ca.crt: |
+    -----BEGIN CERTIFICATE-----
+    ... your CA cert here ...
+    -----END CERTIFICATE-----
+
+---
+# Combine glob-pattern namespaces with label selector — both sets are included.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: monitoring-token
+  namespace: observability
+  annotations:
+    spillway.kroy.io/replicate-to: "infra-*"
+    spillway.kroy.io/replicate-to-matching: "monitoring=enabled"
+type: Opaque
+stringData:
+  token: replace-me

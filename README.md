@@ -55,17 +55,20 @@ The website is published from the `docs/` directory by `.github/workflows/deploy
 ### Replica TTL
 
 - `spillway.kroy.io/replica-ttl: "24h"`
-  - Go duration (e.g. `24h`, `7d`, `30m`). Replicas are stamped with an `expires-at` annotation at creation.
-  - Expired replicas are deleted on the next reconcile pass and recreated with a fresh TTL.
+  - Go duration (e.g. `24h`, `168h`, `30m`). Replicas are stamped with an `expires-at` annotation at creation time.
+  - When the TTL elapses the replica is **permanently deleted** — it is **not recreated**. The expired namespace is recorded in `spillway.kroy.io/expired-namespaces` on the source object and skipped on all future reconciles.
+  - To re-enable replication to an expired namespace: manually remove that namespace from the `expired-namespaces` annotation value, or delete the annotation entirely.
+  - Removing `replica-ttl` from a source that has `expired-namespaces` recorded automatically clears the expired record and resumes replication on the next reconcile.
 
 ### Namespace consent
 
 - `spillway.kroy.io/accept-from` on the **target Namespace** (not the source object)
   - Absent → accept from all sources (backward-compatible default)
   - `"all"` or `"*"` → accept from all sources
-  - `"platform"` → accept any object from the `platform` namespace
-  - `"platform:token"` → accept only the object named `token` from `platform`
-  - Comma-separated, mix and match
+  - `"Secret/platform/*"` → any Secret from the `platform` namespace
+  - `"ConfigMap/ops/app-config"` → one specific ConfigMap
+  - `"*/platform/*"` → any kind from the `platform` namespace
+  - Comma-separated; wildcards (`*`) supported in each segment (`Kind/namespace/name`)
 
 Replicas are marked with:
 
@@ -270,8 +273,17 @@ This uses local kubeconfig and requires cluster-wide permissions equivalent to t
 
 ## Examples
 
-- `examples/secret.yaml`
-- `examples/configmap.yaml`
+| File | Demonstrates |
+|------|-------------|
+| `examples/secret.yaml` | Basic Secret replication to all namespaces |
+| `examples/configmap.yaml` | ConfigMap replication with glob patterns and exclusions |
+| `examples/key-projection.yaml` | `include-keys` / `exclude-keys` for partial data sharing |
+| `examples/ttl-replicas.yaml` | `replica-ttl` for time-bounded access; permanent expiry semantics |
+| `examples/label-selector.yaml` | `replicate-to-matching` with label selectors |
+| `examples/namespace-consent.yaml` | Namespace `accept-from` opt-in consent |
+| `examples/profile-basic.yaml` | Basic `SpillwayProfile` CRD — no source annotations required |
+| `examples/profile-advanced.yaml` | Multi-profile per-source key projection |
+| `examples/profile-with-consent.yaml` | `SpillwayProfile` combined with namespace consent |
 
 ## Metrics
 

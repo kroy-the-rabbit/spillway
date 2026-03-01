@@ -1,0 +1,46 @@
+# Namespace consent — namespaces opt in to receiving replicas from specific sources.
+#
+# By default any source with replicate-to: "all" can push into any namespace.
+# The "accept-from" annotation on a Namespace restricts which sources are allowed
+# to replicate into it. Replication from a source not listed is silently skipped.
+#
+# Format: comma-separated list of "Kind/namespace/name" patterns.
+#         Wildcards (*) are supported in each segment.
+#         Examples:
+#           Secret/platform/*         — any Secret from the platform namespace
+#           ConfigMap/ops/app-config  — one specific ConfigMap
+#           Secret/*/shared-token     — a named Secret from any namespace
+#           */*/*                     — allow everything (same as no annotation)
+
+# A namespace that only accepts Secrets from the "platform" namespace
+# and one specific ConfigMap from "ops".
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tenant-a
+  annotations:
+    spillway.kroy.io/accept-from: "Secret/platform/*,ConfigMap/ops/app-config"
+
+---
+# A namespace that accepts everything from the "platform" namespace
+# (Secrets and ConfigMaps) but nothing else.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tenant-b
+  annotations:
+    spillway.kroy.io/accept-from: "*/platform/*"
+
+---
+# Source Secret in the platform namespace — replicates to all non-system namespaces,
+# but only lands in namespaces that accept it via accept-from.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: shared-api-token
+  namespace: platform
+  annotations:
+    spillway.kroy.io/replicate-to: "all"
+type: Opaque
+stringData:
+  token: replace-me

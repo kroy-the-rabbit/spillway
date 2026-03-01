@@ -1,3 +1,5 @@
+# Basic ConfigMap replication — copy to namespaces matching a glob pattern,
+# with one explicit exclusion.
 apiVersion: v1
 kind: ConfigMap
 metadata:
