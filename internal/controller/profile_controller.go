@@ -48,7 +48,7 @@ type ProfileReconciler struct {
 }
 
 func (r *ProfileReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	log := r.Log.WithValues("profile", req.NamespacedName.String())
+	log := r.Log.WithValues("profile", req.String())
 
 	var profile spillwayv1alpha1.SpillwayProfile
 	if err := r.Get(ctx, req.NamespacedName, &profile); err != nil {

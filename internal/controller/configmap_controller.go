@@ -61,7 +61,7 @@ func configMapReconcileConfig() reconcileConfig[*corev1.ConfigMap] {
 }
 
 func (r *ConfigMapReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	log := r.Log.WithValues("configmap", req.NamespacedName.String())
+	log := r.Log.WithValues("configmap", req.String())
 
 	var src corev1.ConfigMap
 	if err := r.Get(ctx, req.NamespacedName, &src); err != nil {

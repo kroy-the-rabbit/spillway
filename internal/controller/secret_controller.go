@@ -61,7 +61,7 @@ func secretReconcileConfig() reconcileConfig[*corev1.Secret] {
 }
 
 func (r *SecretReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	log := r.Log.WithValues("secret", req.NamespacedName.String())
+	log := r.Log.WithValues("secret", req.String())
 
 	var src corev1.Secret
 	if err := r.Get(ctx, req.NamespacedName, &src); err != nil {

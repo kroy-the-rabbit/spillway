@@ -308,8 +308,8 @@ func replicaIsExpired(obj metav1.Object) bool {
 // Namespace consent (accept-from)
 // ---------------------------------------------------------------------------
 
-// checkNamespaceConsent returns true if the target namespace consents to
-// receiving replicas from the given source kind/namespace/name.
+// checkNamespaceConsentWithKind returns true if the target namespace consents
+// to receiving replicas from the given source kind/namespace/name.
 //
 // Supported formats for the AnnotationAcceptFrom value (comma-separated):
 //   - Absent annotation        → accept all (backward compatible default).
@@ -318,15 +318,7 @@ func replicaIsExpired(obj metav1.Object) bool {
 //     segment supports the "*" wildcard (e.g. "Secret/platform/*" or
 //     "*/ops/shared-token" or "*/*/*").
 //
-// When srcKind or srcName are empty the corresponding segments are matched
-// permissively (any value matches).
-func checkNamespaceConsent(ns *corev1.Namespace, srcNamespace, srcName string) bool {
-	return checkNamespaceConsentWithKind(ns, "", srcNamespace, srcName)
-}
-
-// checkNamespaceConsentWithKind is the full implementation. checkNamespaceConsent
-// calls this with an empty kind so callers that don't know the kind (e.g.
-// profile namespace-level checks) still work correctly.
+// When srcKind is empty the kind segment is matched permissively.
 func checkNamespaceConsentWithKind(ns *corev1.Namespace, srcKind, srcNamespace, srcName string) bool {
 	if ns == nil {
 		return true
