@@ -4,8 +4,8 @@ description: >
   Replicates Kubernetes Secrets and ConfigMaps across namespaces in near real
   time using source annotations or SpillwayProfile resources.
 type: application
-version: 0.4.1
-appVersion: "0.4.1"
+version: 0.4.2
+appVersion: "0.4.2"
 keywords:
   - kubernetes
   - secrets
@@ -30,11 +30,7 @@ annotations:
       url: https://github.com/kroy-the-rabbit/spillway
   artifacthub.io/changes: |
     - kind: security
-      description: "Upgrade Go toolchain from 1.22 to 1.24; resolves CVE-2025-68121 (CRITICAL) and 5 HIGH stdlib CVEs"
-    - kind: security
-      description: "Upgrade golang.org/x/oauth2 v0.12.0 → v0.27.0; resolves CVE-2025-22868 (HIGH)"
-    - kind: security
-      description: "Upgrade golang.org/x/net v0.23.0 → v0.38.0; resolves CVE-2025-22872 and CVE-2025-22870 (MEDIUM)"
+      description: "Upgrade Go toolchain 1.24 → 1.26.1; resolves CVE-2026-27142, CVE-2026-25679 (MEDIUM) and CVE-2026-27139 (LOW)"
   artifacthub.io/maintainers: |
     - name: kroy
       email: kroy@kroy.io
