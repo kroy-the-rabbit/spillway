@@ -337,6 +337,160 @@ func TestConfigMapReconcileSmoke_TTLRemovalClearsExpiredNamespaces(t *testing.T)
 	}
 }
 
+// TestConfigMapReconcileSmoke_OwnershipConflict verifies that a pre-existing
+// unmanaged configmap blocks replication without force-adopt.
+func TestConfigMapReconcileSmoke_OwnershipConflict(t *testing.T) {
+	ctx := context.Background()
+
+	// The UID must be non-empty so ensureManagedOwnership sees it as an existing object.
+	unmanagedCM := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "shared-config",
+			Namespace: "team-a",
+			UID:       "pre-existing-uid",
+		},
+		Data: map[string]string{"key": "original"},
+	}
+
+	c, scheme := newCMSmokeClient(t,
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "platform"}},
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "team-a"}},
+		&corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "shared-config",
+				Namespace: "platform",
+				Annotations: map[string]string{
+					AnnotationReplicateTo: "team-a",
+					// No force-adopt.
+				},
+			},
+			Data: map[string]string{"key": "new-value"},
+		},
+		unmanagedCM,
+	)
+
+	r := &ConfigMapReconciler{Client: c, Scheme: scheme, Log: log.Log.WithName("test"), Recorder: record.NewFakeRecorder(100)}
+	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "platform", Name: "shared-config"}}); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+
+	var existing corev1.ConfigMap
+	if err := c.Get(ctx, client.ObjectKey{Namespace: "team-a", Name: "shared-config"}, &existing); err != nil {
+		t.Fatalf("get configmap: %v", err)
+	}
+	if existing.Data["key"] != "original" {
+		t.Fatalf("expected unmanaged configmap to be preserved (key=original), got %q", existing.Data["key"])
+	}
+	if existing.Annotations[AnnotationManagedBy] == ManagedByValue {
+		t.Fatal("expected unmanaged configmap to remain unmanaged without force-adopt")
+	}
+}
+
+// TestConfigMapReconcileSmoke_ForceAdopt verifies that with force-adopt, a
+// pre-existing unmanaged configmap IS overwritten by the replica.
+func TestConfigMapReconcileSmoke_ForceAdopt(t *testing.T) {
+	ctx := context.Background()
+
+	// The UID must be non-empty so ensureManagedOwnership sees it as an existing object.
+	unmanagedCM := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "shared-config",
+			Namespace: "team-a",
+			UID:       "pre-existing-uid",
+		},
+		Data: map[string]string{"key": "original"},
+	}
+
+	c, scheme := newCMSmokeClient(t,
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "platform"}},
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "team-a"}},
+		&corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "shared-config",
+				Namespace: "platform",
+				Annotations: map[string]string{
+					AnnotationReplicateTo: "team-a",
+					AnnotationForceAdopt:  "true",
+				},
+			},
+			Data: map[string]string{"key": "new-value"},
+		},
+		unmanagedCM,
+	)
+
+	r := &ConfigMapReconciler{Client: c, Scheme: scheme, Log: log.Log.WithName("test"), Recorder: record.NewFakeRecorder(100)}
+	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "platform", Name: "shared-config"}}); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+
+	var adopted corev1.ConfigMap
+	if err := c.Get(ctx, client.ObjectKey{Namespace: "team-a", Name: "shared-config"}, &adopted); err != nil {
+		t.Fatalf("get configmap: %v", err)
+	}
+	if adopted.Data["key"] != "new-value" {
+		t.Fatalf("expected force-adopt to overwrite unmanaged configmap, got key=%q", adopted.Data["key"])
+	}
+	if adopted.Annotations[AnnotationManagedBy] != ManagedByValue {
+		t.Fatal("expected adopted configmap to have managed-by annotation")
+	}
+}
+
+// TestConfigMapReconcileSmoke_NamespaceConsent verifies that namespace accept-from
+// annotation correctly gates replication.
+//
+// team-a has accept-from: "ConfigMap/platform/*" → should receive replica.
+// team-b has accept-from: "ConfigMap/other/*"    → should NOT receive replica.
+func TestConfigMapReconcileSmoke_NamespaceConsent(t *testing.T) {
+	ctx := context.Background()
+
+	c, scheme := newCMSmokeClient(t,
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "platform"}},
+		&corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "team-a",
+				Annotations: map[string]string{
+					AnnotationAcceptFrom: "ConfigMap/platform/*",
+				},
+			},
+		},
+		&corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "team-b",
+				Annotations: map[string]string{
+					AnnotationAcceptFrom: "ConfigMap/other/*",
+				},
+			},
+		},
+		&corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "shared-config",
+				Namespace: "platform",
+				Annotations: map[string]string{
+					AnnotationReplicateTo: "team-a,team-b",
+				},
+			},
+			Data: map[string]string{"key": "value"},
+		},
+	)
+
+	r := &ConfigMapReconciler{Client: c, Scheme: scheme, Log: log.Log.WithName("test"), Recorder: record.NewFakeRecorder(100)}
+	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "platform", Name: "shared-config"}}); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+
+	// team-a accepts from ConfigMap/platform/* — should have replica.
+	var teamAReplica corev1.ConfigMap
+	if err := c.Get(ctx, client.ObjectKey{Namespace: "team-a", Name: "shared-config"}, &teamAReplica); err != nil {
+		t.Fatalf("expected replica in team-a (accept-from matches): %v", err)
+	}
+
+	// team-b accepts from ConfigMap/other/* — should NOT have replica.
+	var teamBReplica corev1.ConfigMap
+	if err := c.Get(ctx, client.ObjectKey{Namespace: "team-b", Name: "shared-config"}, &teamBReplica); !apierrors.IsNotFound(err) {
+		t.Fatalf("expected no replica in team-b (accept-from rejects platform source), got err=%v", err)
+	}
+}
+
 func newCMSmokeClient(t *testing.T, objs ...client.Object) (client.Client, *runtime.Scheme) {
 	t.Helper()
 	scheme := runtime.NewScheme()

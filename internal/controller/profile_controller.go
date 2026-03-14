@@ -11,6 +11,7 @@ import (
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -24,6 +25,17 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 
 	spillwayv1alpha1 "spillway/api/v1alpha1"
+)
+
+// Condition type constants for SpillwayProfile status.
+const (
+	// ProfileConditionReady is True when all sources synced successfully,
+	// False on any error, Unknown while reconciling.
+	ProfileConditionReady = "Ready"
+
+	// ProfileConditionSourcesAvailable is True when all sources in spec exist,
+	// False if any source is missing.
+	ProfileConditionSourcesAvailable = "SourcesAvailable"
 )
 
 // ProfileReconciler reconciles SpillwayProfile objects.
@@ -85,8 +97,8 @@ func (r *ProfileReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		matchingSel = sel
 	}
 
-	// Resolve target namespaces. Use empty sourceName for namespace-level consent only.
-	targets, err := resolveTargetNamespaces(ctx, r.Client, include, exclude, matchingSel, profile.Namespace, "")
+	// Resolve target namespaces. Use empty kind and name for namespace-level consent only.
+	targets, err := resolveTargetNamespaces(ctx, r.Client, include, exclude, matchingSel, "", profile.Namespace, "")
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -95,19 +107,26 @@ func (r *ProfileReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	desired := map[string]struct{}{}
 	changedCount := 0
 	var errs []error
+	missingSources := 0
 
 	for _, srcSpec := range profile.Spec.Sources {
 		kf := keyFilterFromLists(srcSpec.IncludeKeys, srcSpec.ExcludeKeys)
 		switch srcSpec.Kind {
 		case "Secret":
-			n, err := r.syncProfileSecret(ctx, log, &profile, profileRef, srcSpec.Name, kf, targets, desired)
+			n, missing, err := r.syncProfileSecret(ctx, log, &profile, profileRef, srcSpec.Name, kf, targets, desired)
 			changedCount += n
+			if missing {
+				missingSources++
+			}
 			if err != nil {
 				errs = append(errs, err)
 			}
 		case "ConfigMap":
-			n, err := r.syncProfileConfigMap(ctx, log, &profile, profileRef, srcSpec.Name, kf, targets, desired)
+			n, missing, err := r.syncProfileConfigMap(ctx, log, &profile, profileRef, srcSpec.Name, kf, targets, desired)
 			changedCount += n
+			if missing {
+				missingSources++
+			}
 			if err != nil {
 				errs = append(errs, err)
 			}
@@ -121,7 +140,39 @@ func (r *ProfileReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		errs = append(errs, cleanErr)
 	}
 
-	// Update status with the set of replicated namespaces.
+	// Build status conditions.
+	now := metav1.Now()
+	sourcesAvailableCond := metav1.Condition{
+		Type:               ProfileConditionSourcesAvailable,
+		ObservedGeneration: profile.Generation,
+		LastTransitionTime: now,
+	}
+	if missingSources == 0 {
+		sourcesAvailableCond.Status = metav1.ConditionTrue
+		sourcesAvailableCond.Reason = "AllSourcesFound"
+		sourcesAvailableCond.Message = "All sources listed in spec were found."
+	} else {
+		sourcesAvailableCond.Status = metav1.ConditionFalse
+		sourcesAvailableCond.Reason = "SourceMissing"
+		sourcesAvailableCond.Message = fmt.Sprintf("%d source(s) not found in profile namespace.", missingSources)
+	}
+
+	readyCond := metav1.Condition{
+		Type:               ProfileConditionReady,
+		ObservedGeneration: profile.Generation,
+		LastTransitionTime: now,
+	}
+	if len(errs) == 0 {
+		readyCond.Status = metav1.ConditionTrue
+		readyCond.Reason = "SyncSucceeded"
+		readyCond.Message = "All sources synced successfully."
+	} else {
+		readyCond.Status = metav1.ConditionFalse
+		readyCond.Reason = "SyncFailed"
+		readyCond.Message = fmt.Sprintf("Encountered %d error(s) during replication.", len(errs))
+	}
+
+	// Update status with the set of replicated namespaces and conditions.
 	replicatedSet := map[string]struct{}{}
 	for k := range desired {
 		parts := strings.SplitN(k, "/", 2)
@@ -133,6 +184,8 @@ func (r *ProfileReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 	sort.Strings(replicatedNS)
 	profile.Status.ReplicatedNamespaces = replicatedNS
+	apimeta.SetStatusCondition(&profile.Status.Conditions, sourcesAvailableCond)
+	apimeta.SetStatusCondition(&profile.Status.Conditions, readyCond)
 	if sErr := r.Status().Update(ctx, &profile); sErr != nil && !apierrors.IsNotFound(sErr) {
 		log.V(1).Info("failed to update profile status", "error", sErr)
 	}
@@ -160,14 +213,14 @@ func (r *ProfileReconciler) syncProfileSecret(
 	kf keyFilter,
 	targets []string,
 	desired map[string]struct{},
-) (int, error) {
+) (int, bool, error) {
 	var src corev1.Secret
 	if err := r.Get(ctx, client.ObjectKey{Namespace: profile.Namespace, Name: srcName}, &src); err != nil {
 		if apierrors.IsNotFound(err) {
 			log.Info("source secret not found, skipping", "name", srcName)
-			return 0, nil
+			return 0, true, nil
 		}
-		return 0, err
+		return 0, false, err
 	}
 
 	changed := 0
@@ -208,7 +261,7 @@ func (r *ProfileReconciler) syncProfileSecret(
 					"namespace", ns, "name", srcName)
 			} else {
 				log.Error(syncErr, "failed to sync profile secret", "namespace", ns, "name", srcName)
-				return changed, syncErr
+				return changed, false, syncErr
 			}
 			continue
 		}
@@ -219,7 +272,7 @@ func (r *ProfileReconciler) syncProfileSecret(
 			}
 		}
 	}
-	return changed, nil
+	return changed, false, nil
 }
 
 func (r *ProfileReconciler) syncProfileConfigMap(
@@ -230,14 +283,14 @@ func (r *ProfileReconciler) syncProfileConfigMap(
 	kf keyFilter,
 	targets []string,
 	desired map[string]struct{},
-) (int, error) {
+) (int, bool, error) {
 	var src corev1.ConfigMap
 	if err := r.Get(ctx, client.ObjectKey{Namespace: profile.Namespace, Name: srcName}, &src); err != nil {
 		if apierrors.IsNotFound(err) {
 			log.Info("source configmap not found, skipping", "name", srcName)
-			return 0, nil
+			return 0, true, nil
 		}
-		return 0, err
+		return 0, false, err
 	}
 
 	changed := 0
@@ -277,7 +330,7 @@ func (r *ProfileReconciler) syncProfileConfigMap(
 					"namespace", ns, "name", srcName)
 			} else {
 				log.Error(syncErr, "failed to sync profile configmap", "namespace", ns, "name", srcName)
-				return changed, syncErr
+				return changed, false, syncErr
 			}
 			continue
 		}
@@ -288,7 +341,7 @@ func (r *ProfileReconciler) syncProfileConfigMap(
 			}
 		}
 	}
-	return changed, nil
+	return changed, false, nil
 }
 
 // cleanupStaleProfileReplicas deletes profile-owned replicas not present in desired.

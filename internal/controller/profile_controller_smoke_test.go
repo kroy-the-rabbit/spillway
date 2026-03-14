@@ -6,6 +6,7 @@ import (
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -210,6 +211,100 @@ func TestProfileReconcileSmoke_SkipsMissingSource(t *testing.T) {
 
 	if _, err := r.Reconcile(context.Background(), profileReq("platform", "my-profile")); err != nil {
 		t.Fatalf("reconcile should not error on missing source, got: %v", err)
+	}
+}
+
+func TestProfileReconcileSmoke_ConditionsSetOnSuccess(t *testing.T) {
+	srcSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "platform-token", Namespace: "platform"},
+		Data:       map[string][]byte{"token": []byte("s3cr3t")},
+	}
+	profile := &spillwayv1alpha1.SpillwayProfile{
+		ObjectMeta: metav1.ObjectMeta{Name: "cond-profile", Namespace: "platform"},
+		Spec: spillwayv1alpha1.SpillwayProfileSpec{
+			TargetNamespaces: []string{"team-a"},
+			Sources: []spillwayv1alpha1.ProfileSource{
+				{Kind: "Secret", Name: "platform-token"},
+			},
+		},
+	}
+
+	c := newProfileClient(t,
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "platform"}},
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "team-a"}},
+		srcSecret, profile,
+	)
+	r := newProfileRec(t, c)
+
+	if _, err := r.Reconcile(context.Background(), profileReq("platform", "cond-profile")); err != nil {
+		t.Fatalf("reconcile error: %v", err)
+	}
+
+	var updated spillwayv1alpha1.SpillwayProfile
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "platform", Name: "cond-profile"}, &updated); err != nil {
+		t.Fatalf("get profile: %v", err)
+	}
+
+	readyCond := apimeta.FindStatusCondition(updated.Status.Conditions, ProfileConditionReady)
+	if readyCond == nil {
+		t.Fatal("expected Ready condition to be set")
+	}
+	if readyCond.Status != metav1.ConditionTrue {
+		t.Errorf("expected Ready=True, got %v (reason=%s)", readyCond.Status, readyCond.Reason)
+	}
+
+	saCond := apimeta.FindStatusCondition(updated.Status.Conditions, ProfileConditionSourcesAvailable)
+	if saCond == nil {
+		t.Fatal("expected SourcesAvailable condition to be set")
+	}
+	if saCond.Status != metav1.ConditionTrue {
+		t.Errorf("expected SourcesAvailable=True, got %v (reason=%s)", saCond.Status, saCond.Reason)
+	}
+}
+
+func TestProfileReconcileSmoke_ConditionsSetOnMissingSource(t *testing.T) {
+	profile := &spillwayv1alpha1.SpillwayProfile{
+		ObjectMeta: metav1.ObjectMeta{Name: "cond-profile2", Namespace: "platform"},
+		Spec: spillwayv1alpha1.SpillwayProfileSpec{
+			TargetNamespaces: []string{"team-a"},
+			Sources: []spillwayv1alpha1.ProfileSource{
+				{Kind: "Secret", Name: "missing-secret"},
+			},
+		},
+	}
+
+	c := newProfileClient(t,
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "platform"}},
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "team-a"}},
+		profile,
+	)
+	r := newProfileRec(t, c)
+
+	if _, err := r.Reconcile(context.Background(), profileReq("platform", "cond-profile2")); err != nil {
+		t.Fatalf("reconcile should not error on missing source, got: %v", err)
+	}
+
+	var updated spillwayv1alpha1.SpillwayProfile
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "platform", Name: "cond-profile2"}, &updated); err != nil {
+		t.Fatalf("get profile: %v", err)
+	}
+
+	// Ready should be True (no sync error, just source missing).
+	readyCond := apimeta.FindStatusCondition(updated.Status.Conditions, ProfileConditionReady)
+	if readyCond == nil {
+		t.Fatal("expected Ready condition to be set")
+	}
+	if readyCond.Status != metav1.ConditionTrue {
+		t.Errorf("expected Ready=True when source simply missing (no error), got %v", readyCond.Status)
+	}
+
+	// SourcesAvailable should be False.
+	saCond := apimeta.FindStatusCondition(updated.Status.Conditions, ProfileConditionSourcesAvailable)
+	if saCond == nil {
+		t.Fatal("expected SourcesAvailable condition to be set")
+	}
+	if saCond.Status != metav1.ConditionFalse {
+		t.Errorf("expected SourcesAvailable=False when source is missing, got %v", saCond.Status)
 	}
 }
 

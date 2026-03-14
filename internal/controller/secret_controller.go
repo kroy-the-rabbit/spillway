@@ -2,19 +2,19 @@ package controller
 
 import (
 	"context"
-	"errors"
+	"sync"
 	"time"
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 )
@@ -26,6 +26,38 @@ type SecretReconciler struct {
 	Recorder record.EventRecorder
 	// SelfHealInterval requeues active source objects to recover from missed watch events.
 	SelfHealInterval time.Duration
+	// OrphanAuditInterval sets how often to scan for and delete orphaned replicas
+	// whose source no longer exists. Zero (default) disables the audit.
+	OrphanAuditInterval time.Duration
+
+	auditMu   sync.Mutex
+	lastAudit time.Time
+}
+
+// secretReconcileConfig returns the type-specific reconcile configuration for
+// the SecretReconciler, used by the shared reconcileObject function.
+func secretReconcileConfig() reconcileConfig[*corev1.Secret] {
+	return reconcileConfig[*corev1.Secret]{
+		kind:                  "Secret",
+		replicaSourceFieldIdx: secretReplicaSourceFieldIdx,
+		applyData: func(src, target *corev1.Secret, kf keyFilter) {
+			target.Type = src.Type
+			target.Immutable = ptrBool(src.Immutable)
+			target.Data = kf.applyBytes(src.Data)
+		},
+		newObject: func() *corev1.Secret { return &corev1.Secret{} },
+		listReplicas: func(ctx context.Context, c client.Client, fieldIdx, sourceFrom string) ([]*corev1.Secret, error) {
+			var all corev1.SecretList
+			if err := c.List(ctx, &all, client.MatchingFields{fieldIdx: sourceFrom}); err != nil {
+				return nil, err
+			}
+			out := make([]*corev1.Secret, len(all.Items))
+			for i := range all.Items {
+				out[i] = &all.Items[i]
+			}
+			return out, nil
+		},
+	}
 }
 
 func (r *SecretReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -43,226 +75,60 @@ func (r *SecretReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		return ctrl.Result{}, nil
 	}
 
-	selector := listTargetSelector(&src)
-	excludeSelector := listExcludeSelector(&src)
-	matchingSel, err := listMatchingSelector(&src)
+	result, err := reconcileObject(ctx, r.Client, log, r.Recorder, r.SelfHealInterval, secretReconcileConfig(), &src)
 	if err != nil {
-		log.Info("invalid replicate-to-matching selector; skipping until annotation is fixed", "error", err.Error())
-		if r.Recorder != nil {
-			r.Recorder.Eventf(&src, corev1.EventTypeWarning, "InvalidSelector",
-				"Invalid %s annotation: %v", AnnotationReplicateToMatching, err)
-		}
-		return ctrl.Result{}, nil
-	}
-	desc := sourceDescriptor{
-		kind:      "Secret",
-		namespace: src.Namespace,
-		name:      src.Name,
+		return result, err
 	}
 
-	if !src.DeletionTimestamp.IsZero() {
-		if controllerutil.ContainsFinalizer(&src, FinalizerName) {
-			if _, err := r.cleanupReplicatedSecrets(ctx, desc, nil); err != nil {
-				return ctrl.Result{}, err
-			}
-			removeFinalizer(&src)
-			if err := r.Update(ctx, &src); err != nil {
-				return ctrl.Result{}, err
-			}
+	// Run orphan audit if interval has elapsed.
+	if r.OrphanAuditInterval > 0 {
+		r.auditMu.Lock()
+		due := time.Since(r.lastAudit) >= r.OrphanAuditInterval
+		if due {
+			r.lastAudit = time.Now()
 		}
-		return ctrl.Result{}, nil
-	}
-
-	if selector.empty() && matchingSel == nil {
-		if controllerutil.ContainsFinalizer(&src, FinalizerName) {
-			if _, err := r.cleanupReplicatedSecrets(ctx, desc, nil); err != nil {
-				return ctrl.Result{}, err
-			}
-			removeFinalizer(&src)
-			if err := r.Update(ctx, &src); err != nil {
-				return ctrl.Result{}, err
-			}
-		}
-		return ctrl.Result{}, nil
-	}
-
-	if ensureFinalizer(&src) {
-		if err := r.Update(ctx, &src); err != nil {
-			return ctrl.Result{}, err
-		}
-	}
-
-	targets, err := resolveTargetNamespaces(ctx, r.Client, selector, excludeSelector, matchingSel, src.Namespace, src.Name)
-	if err != nil {
-		return ctrl.Result{}, err
-	}
-	logTargetSync(log, desc, targets)
-
-	forceAdopt := isForceAdopt(&src)
-	kf := parseKeyFilter(&src)
-	ttl, hasTTL := parseReplicaTTL(&src)
-
-	// If TTL was removed, clear any previously recorded expired namespaces.
-	if !hasTTL && src.Annotations[AnnotationExpiredNamespaces] != "" {
-		ann := copyStringMap(src.Annotations)
-		delete(ann, AnnotationExpiredNamespaces)
-		src.SetAnnotations(ann)
-		if err := r.Update(ctx, &src); err != nil {
-			return ctrl.Result{}, err
-		}
-		return ctrl.Result{Requeue: true}, nil
-	}
-
-	expiredNS := parseExpiredNamespaces(&src)
-	var newlyExpired []string
-
-	desired := map[string]struct{}{}
-	changedCount := 0
-	skippedConflicts := 0
-	var errs []error
-	for _, ns := range targets {
-		// Skip namespaces where the TTL has already permanently expired.
-		if hasTTL {
-			if _, ok := expiredNS[ns]; ok {
-				continue
-			}
-			// Check if an existing replica has just expired.
-			var existing corev1.Secret
-			if err := r.Get(ctx, client.ObjectKey{Namespace: ns, Name: src.Name}, &existing); err == nil {
-				if replicaIsExpired(&existing) {
-					newlyExpired = append(newlyExpired, ns)
-					continue // leave out of desired; cleanup will delete it
-				}
-			}
-		}
-
-		desired[ns] = struct{}{}
-
-		target := &corev1.Secret{}
-		target.Name = src.Name
-		target.Namespace = ns
-		op, syncErr := controllerutil.CreateOrUpdate(ctx, r.Client, target, func() error {
-			if err := ensureManagedOwnership(target, desc, forceAdopt); err != nil {
-				return err
-			}
-			target.Labels = copyStringMap(src.Labels)
-			if target.Labels == nil {
-				target.Labels = map[string]string{}
-			}
-			target.Labels[LabelManagedBy] = ManagedByValue
-			// Preserve existing expires-at before overwriting annotations.
-			existingExpiry := target.Annotations[AnnotationExpiresAt]
-			target.Annotations = desc.targetAnnotations(src.Annotations)
-			target.Type = src.Type
-			target.Immutable = ptrBool(src.Immutable)
-			target.Data = kf.applyBytes(src.Data)
-			// Stamp or preserve TTL expiry.
-			if hasTTL {
-				if existingExpiry != "" {
-					target.Annotations[AnnotationExpiresAt] = existingExpiry
-				} else {
-					target.Annotations[AnnotationExpiresAt] = time.Now().Add(ttl).Format(time.RFC3339)
-				}
-			}
-			return nil
-		})
-		if syncErr != nil {
-			if isOwnershipConflict(syncErr) {
-				log.Info("skipping secret sync to target namespace", "namespace", ns, "reason", syncErr.Error())
-				skippedConflicts++
-			} else {
-				log.Error(syncErr, "failed to sync secret to target namespace", "namespace", ns)
-				errs = append(errs, syncErr)
-			}
-			continue
-		}
-		if op != controllerutil.OperationResultNone {
-			changedCount++
-			if action := reconcileActionFromOperationResult(op); action != "" {
-				ReconcileChangesTotal.WithLabelValues("Secret", action).Inc()
+		r.auditMu.Unlock()
+		if due {
+			if auditErr := r.auditOrphanedSecretReplicas(ctx); auditErr != nil {
+				r.Log.Error(auditErr, "orphan audit failed")
 			}
 		}
 	}
 
-	deletedCount, err := r.cleanupReplicatedSecrets(ctx, desc, desired)
-	if err != nil {
-		errs = append(errs, err)
-	} else {
-		changedCount += deletedCount
-	}
-
-	// Persist newly expired namespaces on the source so they are skipped on
-	// future reconciles and not recreated.
-	if len(newlyExpired) > 0 {
-		for _, ns := range newlyExpired {
-			expiredNS[ns] = struct{}{}
-		}
-		ann := copyStringMap(src.Annotations)
-		ann[AnnotationExpiredNamespaces] = formatNamespaceSet(expiredNS)
-		src.SetAnnotations(ann)
-		if updateErr := r.Update(ctx, &src); updateErr != nil {
-			errs = append(errs, updateErr)
-		}
-	}
-
-	if len(errs) == 0 {
-		if changedCount > 0 {
-			r.Recorder.Eventf(&src, corev1.EventTypeNormal, "ReplicationSucceeded",
-				"Applied %d change(s) across %d target namespace(s)", changedCount, len(targets))
-			ReplicationsTotal.WithLabelValues("Secret", "success").Add(float64(changedCount))
-		}
-		if skippedConflicts > 0 {
-			r.Recorder.Eventf(&src, corev1.EventTypeNormal, "ReplicationSkipped",
-				"Skipped %d target namespace(s) with pre-existing unmanaged objects", skippedConflicts)
-		}
-	} else {
-		r.Recorder.Eventf(&src, corev1.EventTypeWarning, "ReplicationFailed",
-			"Failed to replicate to %d/%d namespace(s)", len(errs), len(targets))
-		ReplicationsTotal.WithLabelValues("Secret", "error").Add(float64(len(errs)))
-		if skippedConflicts > 0 {
-			r.Recorder.Eventf(&src, corev1.EventTypeNormal, "ReplicationSkipped",
-				"Skipped %d target namespace(s) with pre-existing unmanaged objects", skippedConflicts)
-		}
-	}
-
-	result := ctrl.Result{}
-	if len(errs) == 0 && r.SelfHealInterval > 0 {
-		result.RequeueAfter = r.SelfHealInterval
-	}
-	return result, errors.Join(errs...)
+	return result, nil
 }
 
-func (r *SecretReconciler) cleanupReplicatedSecrets(ctx context.Context, desc sourceDescriptor, keep map[string]struct{}) (int, error) {
+// auditOrphanedSecretReplicas scans all managed Secret replicas and deletes
+// any whose source Secret no longer exists. Profile replicas are skipped.
+func (r *SecretReconciler) auditOrphanedSecretReplicas(ctx context.Context) error {
 	var all corev1.SecretList
-	if err := r.List(
-		ctx,
-		&all,
-		client.MatchingFields{secretReplicaSourceFieldIdx: desc.sourceFrom()},
-	); err != nil {
-		return 0, err
+	if err := r.List(ctx, &all, client.MatchingLabels{LabelManagedBy: ManagedByValue}); err != nil {
+		return err
 	}
-
-	deleted := 0
 	for i := range all.Items {
-		s := &all.Items[i]
-		if !matchesSource(s, desc.kind, desc.namespace, desc.name) {
+		replica := &all.Items[i]
+		// Skip profile-managed replicas.
+		if isProfileReplica(replica) {
 			continue
 		}
-		if keep != nil {
-			if _, ok := keep[s.Namespace]; ok {
-				continue
+		sourceFrom := replica.Annotations[AnnotationSourceFrom]
+		ns, name, ok := parseSourceFrom("Secret", sourceFrom)
+		if !ok {
+			continue
+		}
+		var src corev1.Secret
+		if err := r.Get(ctx, types.NamespacedName{Namespace: ns, Name: name}, &src); err != nil {
+			if apierrors.IsNotFound(err) {
+				r.Log.Info("deleting orphaned Secret replica: source no longer exists",
+					"replica", client.ObjectKeyFromObject(replica).String(),
+					"source", sourceFrom)
+				if delErr := safeDelete(ctx, r.Client, replica); delErr != nil {
+					r.Log.Error(delErr, "failed to delete orphaned Secret replica")
+				}
 			}
 		}
-		if err := safeDelete(ctx, r.Client, s); err != nil {
-			return deleted, err
-		}
-		deleted++
 	}
-	if deleted > 0 {
-		CleanupDeletesTotal.WithLabelValues("Secret").Add(float64(deleted))
-		ReconcileChangesTotal.WithLabelValues("Secret", "delete").Add(float64(deleted))
-	}
-	return deleted, nil
+	return nil
 }
 
 func (r *SecretReconciler) sourceRequestsForNamespace(ctx context.Context, obj client.Object) []ctrl.Request {

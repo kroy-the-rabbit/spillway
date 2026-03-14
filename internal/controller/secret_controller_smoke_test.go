@@ -401,6 +401,170 @@ func TestSecretReconcileSmoke_TTLRemovalClearsExpiredNamespaces(t *testing.T) {
 	}
 }
 
+// TestSecretReconcileSmoke_OwnershipConflict verifies that a pre-existing
+// unmanaged secret in the target namespace blocks replication without force-adopt.
+func TestSecretReconcileSmoke_OwnershipConflict(t *testing.T) {
+	ctx := context.Background()
+
+	// Pre-create an unmanaged secret in team-a (no managed-by annotation).
+	// The UID must be non-empty so ensureManagedOwnership sees it as an existing object.
+	unmanagedSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "shared-token",
+			Namespace: "team-a",
+			UID:       "pre-existing-uid",
+			// No managed-by or source-from annotations — unmanaged.
+		},
+		Type: corev1.SecretTypeOpaque,
+		Data: map[string][]byte{"key": []byte("original")},
+	}
+
+	c, scheme := newSecretSmokeClient(t,
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "platform"}},
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "team-a"}},
+		&corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "shared-token",
+				Namespace: "platform",
+				Annotations: map[string]string{
+					AnnotationReplicateTo: "team-a",
+					// No force-adopt annotation.
+				},
+			},
+			Type: corev1.SecretTypeOpaque,
+			Data: map[string][]byte{"key": []byte("new-value")},
+		},
+		unmanagedSecret,
+	)
+
+	r := &SecretReconciler{Client: c, Scheme: scheme, Log: log.Log.WithName("test"), Recorder: record.NewFakeRecorder(100)}
+	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "platform", Name: "shared-token"}}); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+
+	// The pre-existing unmanaged secret should NOT be overwritten.
+	var existing corev1.Secret
+	if err := c.Get(ctx, client.ObjectKey{Namespace: "team-a", Name: "shared-token"}, &existing); err != nil {
+		t.Fatalf("get secret: %v", err)
+	}
+	if string(existing.Data["key"]) != "original" {
+		t.Fatalf("expected unmanaged secret to be preserved (key=original), got %q", string(existing.Data["key"]))
+	}
+	if existing.Annotations[AnnotationManagedBy] == ManagedByValue {
+		t.Fatal("expected unmanaged secret to remain unmanaged without force-adopt")
+	}
+}
+
+// TestSecretReconcileSmoke_ForceAdopt verifies that with force-adopt, a
+// pre-existing unmanaged secret IS overwritten by the replica.
+func TestSecretReconcileSmoke_ForceAdopt(t *testing.T) {
+	ctx := context.Background()
+
+	// Pre-create an unmanaged secret in team-a (no managed-by annotation).
+	// The UID must be non-empty so ensureManagedOwnership sees it as an existing object.
+	unmanagedSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "shared-token",
+			Namespace: "team-a",
+			UID:       "pre-existing-uid",
+		},
+		Type: corev1.SecretTypeOpaque,
+		Data: map[string][]byte{"key": []byte("original")},
+	}
+
+	c, scheme := newSecretSmokeClient(t,
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "platform"}},
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "team-a"}},
+		&corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "shared-token",
+				Namespace: "platform",
+				Annotations: map[string]string{
+					AnnotationReplicateTo: "team-a",
+					AnnotationForceAdopt:  "true",
+				},
+			},
+			Type: corev1.SecretTypeOpaque,
+			Data: map[string][]byte{"key": []byte("new-value")},
+		},
+		unmanagedSecret,
+	)
+
+	r := &SecretReconciler{Client: c, Scheme: scheme, Log: log.Log.WithName("test"), Recorder: record.NewFakeRecorder(100)}
+	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "platform", Name: "shared-token"}}); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+
+	// The secret should have been overwritten by the replica.
+	var adopted corev1.Secret
+	if err := c.Get(ctx, client.ObjectKey{Namespace: "team-a", Name: "shared-token"}, &adopted); err != nil {
+		t.Fatalf("get secret: %v", err)
+	}
+	if string(adopted.Data["key"]) != "new-value" {
+		t.Fatalf("expected force-adopt to overwrite unmanaged secret, got key=%q", string(adopted.Data["key"]))
+	}
+	if adopted.Annotations[AnnotationManagedBy] != ManagedByValue {
+		t.Fatal("expected adopted secret to have managed-by annotation")
+	}
+}
+
+// TestSecretReconcileSmoke_NamespaceConsent verifies that namespace accept-from
+// annotation correctly gates replication.
+//
+// team-a has accept-from: "Secret/platform/*" → should receive replica.
+// team-b has accept-from: "Secret/other/*"    → should NOT receive replica (wrong source namespace).
+func TestSecretReconcileSmoke_NamespaceConsent(t *testing.T) {
+	ctx := context.Background()
+
+	c, scheme := newSecretSmokeClient(t,
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "platform"}},
+		&corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "team-a",
+				Annotations: map[string]string{
+					AnnotationAcceptFrom: "Secret/platform/*",
+				},
+			},
+		},
+		&corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "team-b",
+				Annotations: map[string]string{
+					AnnotationAcceptFrom: "Secret/other/*",
+				},
+			},
+		},
+		&corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "shared-token",
+				Namespace: "platform",
+				Annotations: map[string]string{
+					AnnotationReplicateTo: "team-a,team-b",
+				},
+			},
+			Type: corev1.SecretTypeOpaque,
+			Data: map[string][]byte{"token": []byte("abc")},
+		},
+	)
+
+	r := &SecretReconciler{Client: c, Scheme: scheme, Log: log.Log.WithName("test"), Recorder: record.NewFakeRecorder(100)}
+	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "platform", Name: "shared-token"}}); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+
+	// team-a accepts from Secret/platform/* — should have replica.
+	var teamAReplica corev1.Secret
+	if err := c.Get(ctx, client.ObjectKey{Namespace: "team-a", Name: "shared-token"}, &teamAReplica); err != nil {
+		t.Fatalf("expected replica in team-a (accept-from matches): %v", err)
+	}
+
+	// team-b accepts from Secret/other/* — should NOT have replica.
+	var teamBReplica corev1.Secret
+	if err := c.Get(ctx, client.ObjectKey{Namespace: "team-b", Name: "shared-token"}, &teamBReplica); !apierrors.IsNotFound(err) {
+		t.Fatalf("expected no replica in team-b (accept-from rejects platform source), got err=%v", err)
+	}
+}
+
 func newSecretSmokeClient(t *testing.T, objs ...client.Object) (client.Client, *runtime.Scheme) {
 	t.Helper()
 	scheme := runtime.NewScheme()

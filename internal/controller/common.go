@@ -286,7 +286,12 @@ func formatNamespaceSet(m map[string]struct{}) string {
 	return strings.Join(ns, ",")
 }
 
-// replicaIsExpired returns true if the replica's expires-at annotation is in the past.
+// replicaTTLGracePeriod is added to the expires-at time before comparing with
+// the current clock, providing a buffer for clock skew between nodes.
+const replicaTTLGracePeriod = 5 * time.Second
+
+// replicaIsExpired returns true if the replica's expires-at annotation is in
+// the past (accounting for a small grace period to tolerate clock skew).
 func replicaIsExpired(obj metav1.Object) bool {
 	raw := obj.GetAnnotations()[AnnotationExpiresAt]
 	if raw == "" {
@@ -296,7 +301,7 @@ func replicaIsExpired(obj metav1.Object) bool {
 	if err != nil {
 		return false
 	}
-	return time.Now().After(t)
+	return time.Now().After(t.Add(replicaTTLGracePeriod))
 }
 
 // ---------------------------------------------------------------------------
@@ -304,17 +309,25 @@ func replicaIsExpired(obj metav1.Object) bool {
 // ---------------------------------------------------------------------------
 
 // checkNamespaceConsent returns true if the target namespace consents to
-// receiving replicas from the given source namespace/name.
+// receiving replicas from the given source kind/namespace/name.
 //
-// Rules:
-//   - Absent annotation → accept all (backward compatible default).
-//   - "all" or "*" → accept all.
-//   - "platform" → accept any object from the platform namespace.
-//   - "platform:token" → accept only the object named "token" from platform.
+// Supported formats for the AnnotationAcceptFrom value (comma-separated):
+//   - Absent annotation        → accept all (backward compatible default).
+//   - "all" or "*"             → explicitly accept all.
+//   - "Kind/namespace/name"    → match on kind, namespace, and name; each
+//     segment supports the "*" wildcard (e.g. "Secret/platform/*" or
+//     "*/ops/shared-token" or "*/*/*").
 //
-// When srcName is empty the check is namespace-level only (object-specific
-// tokens are skipped).
+// When srcKind or srcName are empty the corresponding segments are matched
+// permissively (any value matches).
 func checkNamespaceConsent(ns *corev1.Namespace, srcNamespace, srcName string) bool {
+	return checkNamespaceConsentWithKind(ns, "", srcNamespace, srcName)
+}
+
+// checkNamespaceConsentWithKind is the full implementation. checkNamespaceConsent
+// calls this with an empty kind so callers that don't know the kind (e.g.
+// profile namespace-level checks) still work correctly.
+func checkNamespaceConsentWithKind(ns *corev1.Namespace, srcKind, srcNamespace, srcName string) bool {
 	if ns == nil {
 		return true
 	}
@@ -324,25 +337,27 @@ func checkNamespaceConsent(ns *corev1.Namespace, srcNamespace, srcName string) b
 	}
 	for _, token := range strings.Split(raw, ",") {
 		token = strings.TrimSpace(token)
-		switch {
-		case token == "" || token == "all" || token == "*":
+		if token == "" {
+			continue
+		}
+		// Global wildcard shortcuts.
+		if token == "all" || token == "*" {
 			return true
-		case strings.Contains(token, ":"):
-			parts := strings.SplitN(token, ":", 2)
-			if parts[0] != srcNamespace {
-				continue
-			}
-			if srcName == "" {
-				// Namespace-level check only — skip object-specific tokens.
-				continue
-			}
-			if parts[1] == "*" || parts[1] == srcName {
-				return true
-			}
-		default:
-			if token == srcNamespace {
-				return true
-			}
+		}
+		// "Kind/namespace/name" format (each segment may be "*").
+		parts := strings.SplitN(token, "/", 3)
+		if len(parts) != 3 {
+			// Unrecognised format — skip this token.
+			continue
+		}
+		kindPat, nsPat, namePat := parts[0], parts[1], parts[2]
+
+		kindMatch := kindPat == "*" || srcKind == "" || kindPat == srcKind
+		nsMatch := nsPat == "*" || nsPat == srcNamespace
+		nameMatch := namePat == "*" || srcName == "" || namePat == srcName
+
+		if kindMatch && nsMatch && nameMatch {
+			return true
 		}
 	}
 	return false
@@ -358,6 +373,7 @@ func resolveTargetNamespaces(
 	include targetSelector,
 	exclude targetSelector,
 	matchingSel labels.Selector,
+	sourceKind string,
 	sourceNamespace string,
 	sourceName string,
 ) ([]string, error) {
@@ -382,7 +398,7 @@ func resolveTargetNamespaces(
 				}
 				return nil, err
 			}
-			if !checkNamespaceConsent(&ns, sourceNamespace, sourceName) {
+			if !checkNamespaceConsentWithKind(&ns, sourceKind, sourceNamespace, sourceName) {
 				continue
 			}
 			out = append(out, nsName)
@@ -417,7 +433,7 @@ func resolveTargetNamespaces(
 		if exclude.matchesNamespace(nsName) {
 			continue
 		}
-		if !checkNamespaceConsent(ns, sourceNamespace, sourceName) {
+		if !checkNamespaceConsentWithKind(ns, sourceKind, sourceNamespace, sourceName) {
 			continue
 		}
 		out = append(out, nsName)
