@@ -242,7 +242,7 @@
   <section>
     <h2>Install</h2>
     <pre><code>helm install spillway oci://ghcr.io/kroy-the-rabbit/charts/spillway \
-  --version 0.3.2 \
+  --version 0.3.3 \
   --namespace spillway-system \
   --create-namespace</code></pre>
     <p>Requires Kubernetes 1.25+ and Helm 3.10+. The chart is published to GHCR as an OCI artifact — no <code>helm repo add</code> needed. The <code>SpillwayProfile</code> CRD is installed automatically.</p>
@@ -325,7 +325,7 @@ spec:
     - kind: ConfigMap
       name: app-config
       excludeKeys: ["internal-notes"]</code></pre>
-    <p>The profile reconciler creates and updates replicas as sources change, removes replicas from namespaces that no longer match, and cleans up everything when the profile is deleted.</p>
+    <p>The profile reconciler creates and updates replicas as sources change, removes replicas from namespaces that no longer match, enforces <code>accept-from</code> per source, refuses to overwrite unmanaged or annotation-managed targets, and cleans up everything when the profile is deleted.</p>
   </section>
 
   <section>
@@ -381,7 +381,7 @@ metadata:
           </tr>
           <tr>
             <td><code>force-adopt</code></td>
-            <td>Set to <code>"true"</code> to take ownership of a pre-existing unmanaged object instead of skipping it.</td>
+            <td>Set to <code>"true"</code> to take ownership of a pre-existing unmanaged object instead of skipping it. This applies to annotation-driven replication only.</td>
           </tr>
           <tr>
             <td><code>accept-from</code> <em>(on Namespace)</em></td>
@@ -396,7 +396,7 @@ metadata:
   <section>
     <h2>Upgrade</h2>
     <pre><code>helm upgrade spillway oci://ghcr.io/kroy-the-rabbit/charts/spillway \
-  --version 0.3.2 \
+  --version 0.3.3 \
   --namespace spillway-system \
   --reuse-values</code></pre>
   </section>

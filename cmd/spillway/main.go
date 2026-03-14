@@ -29,6 +29,7 @@ func main() {
 		enableLeaderElection bool
 		syncPeriod           time.Duration
 		selfHealInterval     time.Duration
+		orphanAuditInterval  time.Duration
 		printVersion         bool
 	)
 
@@ -37,6 +38,7 @@ func main() {
 	flag.BoolVar(&enableLeaderElection, "leader-elect", true, "Enable leader election for controller manager.")
 	flag.DurationVar(&syncPeriod, "sync-period", 5*time.Minute, "Periodic resync interval.")
 	flag.DurationVar(&selfHealInterval, "self-heal-interval", 45*time.Second, "Per-object self-heal fallback requeue interval (0 to disable).")
+	flag.DurationVar(&orphanAuditInterval, "orphan-audit-interval", 0, "Periodic audit interval for deleting orphaned annotation-managed replicas (0 to disable).")
 	flag.BoolVar(&printVersion, "version", false, "Print version and exit.")
 	opts := zap.Options{Development: false}
 	opts.BindFlags(flag.CommandLine)
@@ -68,22 +70,24 @@ func main() {
 	}
 
 	if err := (&controller.SecretReconciler{
-		Client:           mgr.GetClient(),
-		Scheme:           mgr.GetScheme(),
-		Log:              ctrl.Log.WithName("controllers").WithName("secret"),
-		Recorder:         mgr.GetEventRecorderFor("spillway"),
-		SelfHealInterval: selfHealInterval,
+		Client:              mgr.GetClient(),
+		Scheme:              mgr.GetScheme(),
+		Log:                 ctrl.Log.WithName("controllers").WithName("secret"),
+		Recorder:            mgr.GetEventRecorderFor("spillway"),
+		SelfHealInterval:    selfHealInterval,
+		OrphanAuditInterval: orphanAuditInterval,
 	}).SetupWithManager(mgr); err != nil {
 		ctrl.Log.Error(err, "unable to create secret controller")
 		os.Exit(1)
 	}
 
 	if err := (&controller.ConfigMapReconciler{
-		Client:           mgr.GetClient(),
-		Scheme:           mgr.GetScheme(),
-		Log:              ctrl.Log.WithName("controllers").WithName("configmap"),
-		Recorder:         mgr.GetEventRecorderFor("spillway"),
-		SelfHealInterval: selfHealInterval,
+		Client:              mgr.GetClient(),
+		Scheme:              mgr.GetScheme(),
+		Log:                 ctrl.Log.WithName("controllers").WithName("configmap"),
+		Recorder:            mgr.GetEventRecorderFor("spillway"),
+		SelfHealInterval:    selfHealInterval,
+		OrphanAuditInterval: orphanAuditInterval,
 	}).SetupWithManager(mgr); err != nil {
 		ctrl.Log.Error(err, "unable to create configmap controller")
 		os.Exit(1)

@@ -56,6 +56,9 @@ controller:
   syncPeriod: 5m
   # -- Per-object self-heal fallback requeue interval. Set to 0 to disable.
   selfHealInterval: 45s
+  # -- Periodic audit interval for deleting orphaned annotation-managed replicas.
+  # Set to 0 to disable.
+  orphanAuditInterval: 0s
   # -- Address for the Prometheus metrics endpoint.
   metricsBindAddress: ":8080"
   # -- Address for the health and readiness probe endpoints.
@@ -157,10 +160,11 @@ podDisruptionBudget:
   # maxUnavailable: 1
 
 networkPolicy:
-  # -- Create a NetworkPolicy allowing ingress only to the metrics and probes ports.
+  # -- Create a NetworkPolicy that leaves probes reachable and limits metrics
+  # ingress to pods in the same namespace by default.
   enabled: true
   # -- Extra ingress rules added to the NetworkPolicy (e.g. to allow specific scraper pods).
-  # ingress: []
+  ingress: []
 
 # -- Create the spillway-system namespace. Set to false if the namespace already exists
 # or is managed externally.

@@ -97,8 +97,8 @@ func (r *ProfileReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		matchingSel = sel
 	}
 
-	// Resolve target namespaces. Use empty kind and name for namespace-level consent only.
-	targets, err := resolveTargetNamespaces(ctx, r.Client, include, exclude, matchingSel, "", profile.Namespace, "")
+	// Resolve candidate target namespaces first, then enforce accept-from per source.
+	targets, err := resolveTargetNamespacesWithoutConsent(ctx, r.Client, include, exclude, matchingSel, profile.Namespace)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -225,23 +225,31 @@ func (r *ProfileReconciler) syncProfileSecret(
 
 	changed := 0
 	for _, ns := range targets {
-		key := ns + "/Secret/" + srcName
-		desired[key] = struct{}{}
+		var nsObj corev1.Namespace
+		if err := r.Get(ctx, client.ObjectKey{Name: ns}, &nsObj); err != nil {
+			return changed, false, err
+		}
+		if !checkNamespaceConsentWithKind(&nsObj, "Secret", profile.Namespace, srcName) {
+			log.Info("skipping profile secret", "namespace", ns, "name", srcName, "reason", "namespace consent denies source")
+			continue
+		}
 
 		target := &corev1.Secret{}
 		target.Name = srcName
 		target.Namespace = ns
-		op, syncErr := controllerutil.CreateOrUpdate(ctx, r.Client, target, func() error {
-			// Refuse to adopt replicas owned by a different profile.
-			if target.UID != "" {
-				existingRef := target.Annotations[AnnotationProfileRef]
-				if existingRef != "" && existingRef != profileRef {
-					return ownershipConflictError{
-						objType: "Secret", namespace: ns, name: srcName,
-						sourceKey: profileRef,
-					}
-				}
+		if err := r.Get(ctx, client.ObjectKey{Namespace: ns, Name: srcName}, target); err != nil {
+			if !apierrors.IsNotFound(err) {
+				return changed, false, err
 			}
+			target = &corev1.Secret{}
+			target.Name = srcName
+			target.Namespace = ns
+		} else if err := ensureProfileOwnership(target, "Secret", profileRef); err != nil {
+			log.Info("skipping profile secret", "namespace", ns, "name", srcName, "reason", err.Error())
+			continue
+		}
+
+		op, syncErr := controllerutil.CreateOrUpdate(ctx, r.Client, target, func() error {
 			if target.Labels == nil {
 				target.Labels = map[string]string{}
 			}
@@ -256,15 +264,11 @@ func (r *ProfileReconciler) syncProfileSecret(
 			return nil
 		})
 		if syncErr != nil {
-			if isOwnershipConflict(syncErr) {
-				log.Info("skipping profile secret: owned by another profile",
-					"namespace", ns, "name", srcName)
-			} else {
-				log.Error(syncErr, "failed to sync profile secret", "namespace", ns, "name", srcName)
-				return changed, false, syncErr
-			}
-			continue
+			log.Error(syncErr, "failed to sync profile secret", "namespace", ns, "name", srcName)
+			return changed, false, syncErr
 		}
+		key := ns + "/Secret/" + srcName
+		desired[key] = struct{}{}
 		if op != controllerutil.OperationResultNone {
 			changed++
 			if action := reconcileActionFromOperationResult(op); action != "" {
@@ -295,22 +299,31 @@ func (r *ProfileReconciler) syncProfileConfigMap(
 
 	changed := 0
 	for _, ns := range targets {
-		key := ns + "/ConfigMap/" + srcName
-		desired[key] = struct{}{}
+		var nsObj corev1.Namespace
+		if err := r.Get(ctx, client.ObjectKey{Name: ns}, &nsObj); err != nil {
+			return changed, false, err
+		}
+		if !checkNamespaceConsentWithKind(&nsObj, "ConfigMap", profile.Namespace, srcName) {
+			log.Info("skipping profile configmap", "namespace", ns, "name", srcName, "reason", "namespace consent denies source")
+			continue
+		}
 
 		target := &corev1.ConfigMap{}
 		target.Name = srcName
 		target.Namespace = ns
-		op, syncErr := controllerutil.CreateOrUpdate(ctx, r.Client, target, func() error {
-			if target.UID != "" {
-				existingRef := target.Annotations[AnnotationProfileRef]
-				if existingRef != "" && existingRef != profileRef {
-					return ownershipConflictError{
-						objType: "ConfigMap", namespace: ns, name: srcName,
-						sourceKey: profileRef,
-					}
-				}
+		if err := r.Get(ctx, client.ObjectKey{Namespace: ns, Name: srcName}, target); err != nil {
+			if !apierrors.IsNotFound(err) {
+				return changed, false, err
 			}
+			target = &corev1.ConfigMap{}
+			target.Name = srcName
+			target.Namespace = ns
+		} else if err := ensureProfileOwnership(target, "ConfigMap", profileRef); err != nil {
+			log.Info("skipping profile configmap", "namespace", ns, "name", srcName, "reason", err.Error())
+			continue
+		}
+
+		op, syncErr := controllerutil.CreateOrUpdate(ctx, r.Client, target, func() error {
 			if target.Labels == nil {
 				target.Labels = map[string]string{}
 			}
@@ -325,15 +338,11 @@ func (r *ProfileReconciler) syncProfileConfigMap(
 			return nil
 		})
 		if syncErr != nil {
-			if isOwnershipConflict(syncErr) {
-				log.Info("skipping profile configmap: owned by another profile",
-					"namespace", ns, "name", srcName)
-			} else {
-				log.Error(syncErr, "failed to sync profile configmap", "namespace", ns, "name", srcName)
-				return changed, false, syncErr
-			}
-			continue
+			log.Error(syncErr, "failed to sync profile configmap", "namespace", ns, "name", srcName)
+			return changed, false, syncErr
 		}
+		key := ns + "/ConfigMap/" + srcName
+		desired[key] = struct{}{}
 		if op != controllerutil.OperationResultNone {
 			changed++
 			if action := reconcileActionFromOperationResult(op); action != "" {

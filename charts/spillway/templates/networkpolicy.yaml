@@ -17,11 +17,13 @@ spec:
     - ports:
         - port: 8081
           protocol: TCP
-    # Allow Prometheus scrape traffic to the metrics port
+    # Allow metrics scrapes only from pods in the same namespace by default.
     - ports:
         - port: 8080
           protocol: TCP
-      {{- with .Values.networkPolicy.ingress }}
-      {{- toYaml . | nindent 6 }}
-      {{- end }}
+      from:
+        - podSelector: {}
+{{- with .Values.networkPolicy.ingress }}
+{{ toYaml . | nindent 4 }}
+{{- end }}
 {{- end }}

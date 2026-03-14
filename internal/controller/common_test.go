@@ -10,6 +10,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 )
 
 func TestTargetSelectorMatches(t *testing.T) {
@@ -264,6 +265,23 @@ func TestNamespaceChangeAffectsSource_NameSelector(t *testing.T) {
 	}
 	if !got {
 		t.Fatal("expected namespace change to affect source")
+	}
+}
+
+func TestNamespaceEventPredicate_UpdateOnAnnotationChange(t *testing.T) {
+	p := namespaceEventPredicate()
+	oldNS := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "team-a",
+			Labels:      map[string]string{"env": "prod"},
+			Annotations: map[string]string{"spillway.kroy.io/accept-from": "Secret/platform/*"},
+		},
+	}
+	newNS := oldNS.DeepCopy()
+	newNS.Annotations[AnnotationAcceptFrom] = "ConfigMap/platform/app-config"
+
+	if !p.Update(event.UpdateEvent{ObjectOld: oldNS, ObjectNew: newNS}) {
+		t.Fatal("expected namespace annotation change to trigger reconcile")
 	}
 }
 

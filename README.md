@@ -115,7 +115,8 @@ spec:
 The profile reconciler:
 - Creates/updates replicas in all matching namespaces as data changes.
 - Removes replicas from namespaces that no longer match (or when the profile is deleted).
-- Respects namespace `accept-from` consent annotations.
+- Enforces namespace `accept-from` consent annotations per source object.
+- Refuses to overwrite pre-existing unmanaged objects or annotation-managed replicas.
 - Reports `status.replicatedNamespaces`.
 
 Profile replicas carry `spillway.kroy.io/profile-ref` and are independent of annotation-based cleanup — the two mechanisms never interfere with each other.
@@ -132,7 +133,7 @@ Profile replicas carry `spillway.kroy.io/profile-ref` and are independent of ann
 ```bash
 # Pick a released chart version from:
 # https://github.com/kroy-the-rabbit/spillway/releases
-VERSION=0.3.2
+VERSION=0.3.3
 
 helm registry login ghcr.io
 helm install spillway oci://ghcr.io/kroy-the-rabbit/charts/spillway \
@@ -155,7 +156,7 @@ helm upgrade spillway oci://ghcr.io/kroy-the-rabbit/charts/spillway \
 ### Install from local chart path
 
 ```bash
-VERSION=0.3.2
+VERSION=0.3.3
 
 helm install spillway ./charts/spillway \
   --namespace spillway-system \
@@ -194,7 +195,7 @@ topologySpreadConstraints:
 
 ```bash
 helm upgrade --install spillway oci://ghcr.io/kroy-the-rabbit/charts/spillway \
-  --version 0.3.2 \
+  --version 0.3.3 \
   --namespace spillway-system \
   --create-namespace \
   -f values-prod.yaml
@@ -206,7 +207,7 @@ Enable `ServiceMonitor` (Prometheus Operator required):
 
 ```bash
 helm upgrade spillway oci://ghcr.io/kroy-the-rabbit/charts/spillway \
-  --version 0.3.2 \
+  --version 0.3.3 \
   --namespace spillway-system \
   --set metrics.serviceMonitor.enabled=true \
   --set metrics.serviceMonitor.labels.release=prometheus
@@ -216,7 +217,7 @@ helm upgrade spillway oci://ghcr.io/kroy-the-rabbit/charts/spillway \
 
 ```bash
 helm upgrade spillway oci://ghcr.io/kroy-the-rabbit/charts/spillway \
-  --version 0.3.2 \
+  --version 0.3.3 \
   --namespace spillway-system \
   --set networkPolicy.enabled=true
 ```
@@ -226,23 +227,24 @@ helm upgrade spillway oci://ghcr.io/kroy-the-rabbit/charts/spillway \
 | Key | Default | Description |
 |-----|---------|-------------|
 | `image.repository` | `ghcr.io/kroy-the-rabbit/spillway` | Controller image repository |
-| `image.tag` | chart `appVersion` | Image tag (`0.3.2` when appVersion is `0.3.2`) |
+| `image.tag` | chart `appVersion` | Image tag (`0.3.3` when appVersion is `0.3.3`) |
 | `replicaCount` | `2` | Number of controller replicas |
 | `installCRDs` | `true` | Install the SpillwayProfile CRD |
 | `controller.leaderElect` | `true` | Enable leader election |
 | `controller.syncPeriod` | `5m` | Full informer resync interval |
 | `controller.selfHealInterval` | `45s` | Per-source fallback requeue (`0` disables) |
+| `controller.orphanAuditInterval` | `0s` | Periodic orphaned annotation-replica cleanup (`0` disables) |
 | `metrics.service.enabled` | `true` | Expose metrics service |
 | `metrics.serviceMonitor.enabled` | `false` | Create ServiceMonitor |
 | `podDisruptionBudget.enabled` | `true` | Create PodDisruptionBudget |
-| `networkPolicy.enabled` | `true` | Restrict ingress to probe/metrics ports |
+| `networkPolicy.enabled` | `true` | Leave probes reachable and limit metrics ingress to same-namespace pods by default |
 | `createNamespace` | `true` | Create release namespace |
 
 See `charts/spillway/values.yaml` for full defaults.
 
 ## Deploy (Kustomize, simple/dev)
 
-`config/default` uses image tag `0.3.2` by default. Apply with:
+`config/default` uses image tag `0.3.3` by default. Apply with:
 
 ```bash
 kubectl apply -k config/default
@@ -252,7 +254,7 @@ kubectl apply -k config/default
 
 ```bash
 # Single-arch
-VERSION=0.3.2
+VERSION=0.3.3
 docker build --build-arg VERSION="${VERSION}" -t "ghcr.io/kroy-the-rabbit/spillway:${VERSION}" .
 
 # Multi-arch (requires docker buildx)

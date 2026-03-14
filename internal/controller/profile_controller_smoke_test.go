@@ -352,3 +352,146 @@ func TestProfileReconcileSmoke_ExcludeKeysFilter(t *testing.T) {
 		t.Errorf("expected host='db.internal', got %q", replica.Data["host"])
 	}
 }
+
+func TestProfileReconcileSmoke_DoesNotAdoptUnmanagedSecret(t *testing.T) {
+	srcSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "platform-token", Namespace: "platform"},
+		Data:       map[string][]byte{"token": []byte("new-value")},
+	}
+	existing := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "platform-token", Namespace: "team-a"},
+		Data:       map[string][]byte{"token": []byte("keep-me")},
+	}
+	profile := &spillwayv1alpha1.SpillwayProfile{
+		ObjectMeta: metav1.ObjectMeta{Name: "my-profile", Namespace: "platform"},
+		Spec: spillwayv1alpha1.SpillwayProfileSpec{
+			TargetNamespaces: []string{"team-a"},
+			Sources: []spillwayv1alpha1.ProfileSource{
+				{Kind: "Secret", Name: "platform-token"},
+			},
+		},
+	}
+
+	c := newProfileClient(t,
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "platform"}},
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "team-a"}},
+		srcSecret, existing, profile,
+	)
+	r := newProfileRec(t, c)
+
+	if _, err := r.Reconcile(context.Background(), profileReq("platform", "my-profile")); err != nil {
+		t.Fatalf("reconcile error: %v", err)
+	}
+
+	var current corev1.Secret
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "team-a", Name: "platform-token"}, &current); err != nil {
+		t.Fatalf("get target: %v", err)
+	}
+	if got := string(current.Data["token"]); got != "keep-me" {
+		t.Fatalf("expected unmanaged secret to be preserved, got %q", got)
+	}
+	if current.Annotations[AnnotationProfileRef] != "" {
+		t.Fatalf("expected unmanaged secret to remain unowned, got profile-ref=%q", current.Annotations[AnnotationProfileRef])
+	}
+}
+
+func TestProfileReconcileSmoke_DoesNotOverwriteAnnotationManagedReplica(t *testing.T) {
+	srcSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "platform-token", Namespace: "platform"},
+		Data:       map[string][]byte{"token": []byte("new-value")},
+	}
+	existing := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "platform-token",
+			Namespace: "team-a",
+			Annotations: map[string]string{
+				AnnotationManagedBy:  ManagedByValue,
+				AnnotationSourceFrom: "Secret/platform/annotation-source",
+			},
+			Labels: map[string]string{
+				LabelManagedBy: ManagedByValue,
+			},
+		},
+		Data: map[string][]byte{"token": []byte("annotation-owned")},
+	}
+	profile := &spillwayv1alpha1.SpillwayProfile{
+		ObjectMeta: metav1.ObjectMeta{Name: "my-profile", Namespace: "platform"},
+		Spec: spillwayv1alpha1.SpillwayProfileSpec{
+			TargetNamespaces: []string{"team-a"},
+			Sources: []spillwayv1alpha1.ProfileSource{
+				{Kind: "Secret", Name: "platform-token"},
+			},
+		},
+	}
+
+	c := newProfileClient(t,
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "platform"}},
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "team-a"}},
+		srcSecret, existing, profile,
+	)
+	r := newProfileRec(t, c)
+
+	if _, err := r.Reconcile(context.Background(), profileReq("platform", "my-profile")); err != nil {
+		t.Fatalf("reconcile error: %v", err)
+	}
+
+	var current corev1.Secret
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "team-a", Name: "platform-token"}, &current); err != nil {
+		t.Fatalf("get target: %v", err)
+	}
+	if got := string(current.Data["token"]); got != "annotation-owned" {
+		t.Fatalf("expected annotation-managed replica to be preserved, got %q", got)
+	}
+	if current.Annotations[AnnotationProfileRef] != "" {
+		t.Fatalf("expected annotation-managed replica to stay annotation-managed, got profile-ref=%q", current.Annotations[AnnotationProfileRef])
+	}
+}
+
+func TestProfileReconcileSmoke_EnforcesConsentPerSource(t *testing.T) {
+	srcSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "shared-secret", Namespace: "platform"},
+		Data:       map[string][]byte{"token": []byte("s3cr3t")},
+	}
+	srcCM := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: "shared-config", Namespace: "platform"},
+		Data:       map[string]string{"host": "db.internal"},
+	}
+	profile := &spillwayv1alpha1.SpillwayProfile{
+		ObjectMeta: metav1.ObjectMeta{Name: "mixed-profile", Namespace: "platform"},
+		Spec: spillwayv1alpha1.SpillwayProfileSpec{
+			TargetNamespaces: []string{"team-a"},
+			Sources: []spillwayv1alpha1.ProfileSource{
+				{Kind: "Secret", Name: "shared-secret"},
+				{Kind: "ConfigMap", Name: "shared-config"},
+			},
+		},
+	}
+
+	c := newProfileClient(t,
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "platform"}},
+		&corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "team-a",
+				Annotations: map[string]string{
+					AnnotationAcceptFrom: "ConfigMap/platform/shared-config",
+				},
+			},
+		},
+		srcSecret, srcCM, profile,
+	)
+	r := newProfileRec(t, c)
+
+	if _, err := r.Reconcile(context.Background(), profileReq("platform", "mixed-profile")); err != nil {
+		t.Fatalf("reconcile error: %v", err)
+	}
+
+	var cmReplica corev1.ConfigMap
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "team-a", Name: "shared-config"}, &cmReplica); err != nil {
+		t.Fatalf("expected consented configmap replica: %v", err)
+	}
+
+	var secretReplica corev1.Secret
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "team-a", Name: "shared-secret"}, &secretReplica); err == nil {
+		t.Fatal("expected secret replica to be denied by accept-from")
+	}
+}

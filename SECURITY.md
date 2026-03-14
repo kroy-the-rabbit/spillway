@@ -14,17 +14,19 @@ within 7 days of triage.
 
 | Version | Supported |
 |---------|-----------|
-| 0.2.x   | Yes       |
-| < 0.2   | No        |
+| 0.3.x   | Yes       |
+| < 0.3   | No        |
 
 ## Security Considerations
 
 ### Cluster-wide RBAC scope
 
-spillway requires a `ClusterRole` with read/write access to `Secrets`,
-`ConfigMaps`, and `Namespaces` cluster-wide, plus `Leases` in its own
-namespace for leader election. This is by design — the controller must be
-able to read source objects and write replicas in any namespace.
+spillway requires a `ClusterRole` with cluster-wide read access to
+`Secrets`, `ConfigMaps`, `Namespaces`, and `SpillwayProfiles`, plus
+cluster-wide write access to replicated `Secrets` and `ConfigMaps`,
+`spillwayprofiles/status`, `spillwayprofiles/finalizers`, and `Leases`
+for leader election. This is by design — the controller must be able to
+read source objects and write replicas in any namespace.
 
 **Recommendation:** Review the ClusterRole carefully before deploying and
 restrict `spillway.kroy.io/replicate-to` and
@@ -44,8 +46,9 @@ and restrict which workloads can annotate Secrets in your cluster.
 ### Network exposure
 
 The metrics endpoint (`:8080`) exposes Prometheus counters with replication
-statistics. No secret data is exposed, but scrape access should be limited
-via the `networkPolicy.enabled=true` Helm value (default) or equivalent.
+statistics. No secret data is exposed. The default Helm NetworkPolicy limits
+metrics ingress to pods in the release namespace; add explicit
+`networkPolicy.ingress` rules if your scraper runs elsewhere.
 
 ### Supply chain
 

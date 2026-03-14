@@ -363,6 +363,17 @@ func checkNamespaceConsentWithKind(ns *corev1.Namespace, srcKind, srcNamespace, 
 	return false
 }
 
+func resolveTargetNamespacesWithoutConsent(
+	ctx context.Context,
+	c client.Client,
+	include targetSelector,
+	exclude targetSelector,
+	matchingSel labels.Selector,
+	sourceNamespace string,
+) ([]string, error) {
+	return resolveTargetNamespacesInternal(ctx, c, include, exclude, matchingSel, "", sourceNamespace, "", false)
+}
+
 // ---------------------------------------------------------------------------
 // Namespace resolution
 // ---------------------------------------------------------------------------
@@ -376,6 +387,20 @@ func resolveTargetNamespaces(
 	sourceKind string,
 	sourceNamespace string,
 	sourceName string,
+) ([]string, error) {
+	return resolveTargetNamespacesInternal(ctx, c, include, exclude, matchingSel, sourceKind, sourceNamespace, sourceName, true)
+}
+
+func resolveTargetNamespacesInternal(
+	ctx context.Context,
+	c client.Client,
+	include targetSelector,
+	exclude targetSelector,
+	matchingSel labels.Selector,
+	sourceKind string,
+	sourceNamespace string,
+	sourceName string,
+	enforceConsent bool,
 ) ([]string, error) {
 	if include.empty() && matchingSel == nil {
 		return nil, nil
@@ -398,7 +423,7 @@ func resolveTargetNamespaces(
 				}
 				return nil, err
 			}
-			if !checkNamespaceConsentWithKind(&ns, sourceKind, sourceNamespace, sourceName) {
+			if enforceConsent && !checkNamespaceConsentWithKind(&ns, sourceKind, sourceNamespace, sourceName) {
 				continue
 			}
 			out = append(out, nsName)
@@ -433,7 +458,7 @@ func resolveTargetNamespaces(
 		if exclude.matchesNamespace(nsName) {
 			continue
 		}
-		if !checkNamespaceConsentWithKind(ns, sourceKind, sourceNamespace, sourceName) {
+		if enforceConsent && !checkNamespaceConsentWithKind(ns, sourceKind, sourceNamespace, sourceName) {
 			continue
 		}
 		out = append(out, nsName)
@@ -751,7 +776,7 @@ func namespaceEventPredicate() predicate.Predicate {
 			if !okOld || !okNew {
 				return false
 			}
-			return !mapsEqual(oldNS.Labels, newNS.Labels)
+			return !mapsEqual(oldNS.Labels, newNS.Labels) || !mapsEqual(oldNS.Annotations, newNS.Annotations)
 		},
 		DeleteFunc:  func(event.DeleteEvent) bool { return false },
 		GenericFunc: func(event.GenericEvent) bool { return false },
@@ -949,6 +974,18 @@ func ensureManagedOwnership(obj metav1.Object, desc sourceDescriptor, forceAdopt
 		namespace: obj.GetNamespace(),
 		name:      obj.GetName(),
 		sourceKey: desc.sourceKey(),
+	}
+}
+
+func ensureProfileOwnership(obj metav1.Object, objType, profileRef string) error {
+	if obj.GetAnnotations()[AnnotationProfileRef] == profileRef {
+		return nil
+	}
+	return ownershipConflictError{
+		objType:   objType,
+		namespace: obj.GetNamespace(),
+		name:      obj.GetName(),
+		sourceKey: "profile " + profileRef,
 	}
 }
 

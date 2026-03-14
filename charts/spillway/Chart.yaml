@@ -2,10 +2,10 @@ apiVersion: v2
 name: spillway
 description: >
   Replicates Kubernetes Secrets and ConfigMaps across namespaces in near real
-  time using annotations on the source object.
+  time using source annotations or SpillwayProfile resources.
 type: application
-version: 0.3.2
-appVersion: "0.3.2"
+version: 0.3.3
+appVersion: "0.3.3"
 keywords:
   - kubernetes
   - secrets
@@ -33,8 +33,6 @@ annotations:
       description: "Extract shared reconcile logic into generic reconcileObject[T]; Secret and ConfigMap controllers no longer duplicate reconcile code"
     - kind: added
       description: "SpillwayProfile status conditions: Ready and SourcesAvailable set on each reconcile"
-    - kind: added
-      description: "OrphanAuditInterval: periodic scan deletes managed replicas whose source no longer exists"
     - kind: fixed
       description: "ArtifactHub metadata push step is now non-blocking (continue-on-error: true)"
     - kind: fixed
@@ -45,6 +43,12 @@ annotations:
       description: "expired-namespaces annotation is pruned of namespaces that no longer exist"
     - kind: added
       description: "Smoke tests: force-adopt, ownership conflict, namespace consent, and profile conditions"
+    - kind: fixed
+      description: "Profile reconciliation now enforces per-source namespace consent and refuses to overwrite unmanaged or annotation-managed targets"
+    - kind: changed
+      description: "The default NetworkPolicy now limits metrics ingress to same-namespace pods; extra scraper rules can be added with networkPolicy.ingress"
+    - kind: changed
+      description: "orphan-audit-interval is now a real controller flag and Helm value instead of dead metadata"
   artifacthub.io/maintainers: |
     - name: kroy
       email: kroy@kroy.io
