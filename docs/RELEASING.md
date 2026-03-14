@@ -18,7 +18,7 @@ Spillway uses tag-driven semantic versioning releases.
 
 1. Update code/docs/chart.
 2. Set `charts/spillway/Chart.yaml` `version` and `appVersion` to the target version (without `v`).
-3. Update `--version` in the `helm install` and `helm upgrade` blocks in `docs/index.html`.
+3. Update version references in `docs/index.html`, `README.md`, and `config/default/kustomization.yaml` (`newTag`).
 4. Commit changes.
 4. Create a signed tag: `git tag -s vX.Y.Z -m "Release vX.Y.Z"`.
 5. Push branch and tag.
