@@ -14,9 +14,9 @@ linters:
     - misspell
     - gocritic
 
-issues:
-  exclude-rules:
-    # errcheck is noisy in test helpers
-    - path: _test\.go
-      linters:
-        - errcheck
+  exclusions:
+    rules:
+      # errcheck is noisy in test helpers
+      - path: _test\.go
+        linters:
+          - errcheck
