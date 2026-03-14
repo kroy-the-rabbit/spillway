@@ -91,16 +91,15 @@ readinessProbe:
   timeoutSeconds: 5
   failureThreshold: 3
 
-# -- Startup probe configuration. Disabled by default (null). Enable to protect
-# against premature liveness failures during leader lease acquisition on slow nodes.
-# Example:
-#   startupProbe:
-#     httpGet:
-#       path: /healthz
-#       port: probes
-#     failureThreshold: 30
-#     periodSeconds: 10
-startupProbe: {}
+# -- Startup probe configuration. Gives the controller up to 5 minutes
+# (failureThreshold × periodSeconds) to acquire the leader lease before the
+# liveness probe kicks in. Set to {} to disable.
+startupProbe:
+  httpGet:
+    path: /healthz
+    port: probes
+  failureThreshold: 30
+  periodSeconds: 10
 
 # -- Seconds the Pod is given to finish in-flight reconciliations on shutdown.
 terminationGracePeriodSeconds: 10
@@ -112,8 +111,17 @@ nodeSelector: {}
 tolerations: []
 
 # -- Affinity rules applied to the controller Pod.
-# For HA, consider a podAntiAffinity rule to spread replicas across nodes.
-affinity: {}
+# The default soft anti-affinity prefers spreading replicas across nodes for HA.
+# Change to requiredDuringSchedulingIgnoredDuringExecution for hard enforcement.
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          topologyKey: kubernetes.io/hostname
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: spillway
 
 # -- TopologySpreadConstraints for the controller Pod.
 # Example for zone spread with 2 replicas:

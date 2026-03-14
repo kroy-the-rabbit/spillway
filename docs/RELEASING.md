@@ -29,4 +29,5 @@ Spillway uses tag-driven semantic versioning releases.
 ## Validation
 
 - CI runs `gofmt` check, `go test ./...`, `go test -race ./...`, `go vet ./...`, binary build smoke, `helm lint`, Helm template smoke render, and Helm install dry-run.
+- CI also runs `golangci-lint` (errcheck, staticcheck, gocritic, misspell, ineffassign, unused) and a `security` job with `govulncheck` + Trivy filesystem scan (blocks on CRITICAL/HIGH CVEs).
 - Release workflow verifies the git tag matches chart `version` and `appVersion`.
