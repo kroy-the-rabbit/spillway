@@ -24,17 +24,17 @@ var version = "dev"
 
 func main() {
 	var (
-		metricsAddr               string
-		probeAddr                 string
-		enableLeaderElection      bool
-		syncPeriod                time.Duration
-		selfHealInterval          time.Duration
-		orphanAuditInterval       time.Duration
-		printVersion              bool
-		protectedNamespaces       string
-		requireNamespaceConsent   bool
-		allowForceAdopt           bool
-		annotationDenyPrefixes    string
+		metricsAddr             string
+		probeAddr               string
+		enableLeaderElection    bool
+		syncPeriod              time.Duration
+		selfHealInterval        time.Duration
+		orphanAuditInterval     time.Duration
+		printVersion            bool
+		protectedNamespaces     string
+		requireNamespaceConsent bool
+		allowForceAdopt         bool
+		annotationDenyPrefixes  string
 	)
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
