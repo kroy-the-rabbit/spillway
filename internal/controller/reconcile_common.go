@@ -35,6 +35,9 @@ type reconcileConfig[T client.Object] struct {
 
 	// listReplicas lists all replicas for a given source descriptor.
 	listReplicas func(ctx context.Context, c client.Client, fieldIdx, sourceFrom string) ([]T, error)
+
+	// Opts contains cluster-level security policy settings for this reconcile run.
+	Opts Options
 }
 
 // reconcileObject contains the shared reconcile logic used by both
@@ -68,7 +71,7 @@ func reconcileObject[T client.Object](
 
 	if !src.GetDeletionTimestamp().IsZero() {
 		if controllerutil.ContainsFinalizer(src, FinalizerName) {
-			if _, err := cleanupReplicas(ctx, c, cfg, desc, nil); err != nil {
+			if _, err := cleanupReplicas(ctx, c, log, cfg, desc, nil); err != nil {
 				return ctrl.Result{}, err
 			}
 			removeFinalizer(src)
@@ -81,7 +84,7 @@ func reconcileObject[T client.Object](
 
 	if selector.empty() && matchingSel == nil {
 		if controllerutil.ContainsFinalizer(src, FinalizerName) {
-			if _, err := cleanupReplicas(ctx, c, cfg, desc, nil); err != nil {
+			if _, err := cleanupReplicas(ctx, c, log, cfg, desc, nil); err != nil {
 				return ctrl.Result{}, err
 			}
 			removeFinalizer(src)
@@ -98,13 +101,21 @@ func reconcileObject[T client.Object](
 		}
 	}
 
-	targets, err := resolveTargetNamespaces(ctx, c, selector, excludeSelector, matchingSel, cfg.kind, src.GetNamespace(), src.GetName())
+	targets, err := resolveTargetNamespaces(ctx, c, selector, excludeSelector, matchingSel, cfg.kind, src.GetNamespace(), src.GetName(), cfg.Opts)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
 	logTargetSync(log, desc, targets)
 
-	forceAdopt := isForceAdopt(src)
+	// forceAdopt is only honoured when the operator has explicitly enabled it
+	// via --allow-force-adopt. Without the flag the annotation is silently
+	// ignored and the conflict path is taken instead.
+	forceAdopt := cfg.Opts.AllowForceAdopt && isForceAdopt(src)
+	if !cfg.Opts.AllowForceAdopt && isForceAdopt(src) {
+		auditLog(log, auditForceDeny, modeAnnotation,
+			cfg.kind, src.GetNamespace(), src.GetName(), "",
+			"force-adopt annotation present but --allow-force-adopt is disabled")
+	}
 	kf := parseKeyFilter(src)
 	ttl, hasTTL := parseReplicaTTL(src)
 
@@ -139,6 +150,9 @@ func reconcileObject[T client.Object](
 			existing.SetNamespace(ns)
 			if err := c.Get(ctx, client.ObjectKey{Namespace: ns, Name: src.GetName()}, existing); err == nil {
 				if replicaIsExpired(existing) {
+					auditLog(log, auditExpire, modeAnnotation,
+						cfg.kind, src.GetNamespace(), src.GetName(), ns,
+						"replica TTL elapsed; marking namespace permanently expired")
 					newlyExpired = append(newlyExpired, ns)
 					continue // leave out of desired; cleanup will delete it
 				}
@@ -162,7 +176,7 @@ func reconcileObject[T client.Object](
 			target.SetLabels(lbls)
 			// Preserve existing expires-at before overwriting annotations.
 			existingExpiry := target.GetAnnotations()[AnnotationExpiresAt]
-			target.SetAnnotations(desc.targetAnnotations(src.GetAnnotations()))
+			target.SetAnnotations(desc.targetAnnotations(src.GetAnnotations(), cfg.Opts.effectiveAnnotationDenyPrefixes()))
 			cfg.applyData(src, target, kf)
 			// Stamp or preserve TTL expiry.
 			if hasTTL {
@@ -178,7 +192,9 @@ func reconcileObject[T client.Object](
 		})
 		if syncErr != nil {
 			if isOwnershipConflict(syncErr) {
-				log.Info("skipping "+cfg.kind+" sync to target namespace", "namespace", ns, "reason", syncErr.Error())
+				auditLog(log, auditConflict, modeAnnotation,
+					cfg.kind, src.GetNamespace(), src.GetName(), ns,
+					syncErr.Error())
 				skippedConflicts++
 			} else {
 				log.Error(syncErr, "failed to sync "+cfg.kind+" to target namespace", "namespace", ns)
@@ -188,13 +204,16 @@ func reconcileObject[T client.Object](
 		}
 		if op != controllerutil.OperationResultNone {
 			changedCount++
-			if action := reconcileActionFromOperationResult(op); action != "" {
+			action := reconcileActionFromOperationResult(op)
+			if action != "" {
+				auditLog(log, action, modeAnnotation,
+					cfg.kind, src.GetNamespace(), src.GetName(), ns, "")
 				ReconcileChangesTotal.WithLabelValues(cfg.kind, action).Inc()
 			}
 		}
 	}
 
-	deletedCount, err := cleanupReplicas(ctx, c, cfg, desc, desired)
+	deletedCount, err := cleanupReplicas(ctx, c, log, cfg, desc, desired)
 	if err != nil {
 		errs = append(errs, err)
 	} else {
@@ -261,6 +280,7 @@ func reconcileObject[T client.Object](
 func cleanupReplicas[T client.Object](
 	ctx context.Context,
 	c client.Client,
+	log logr.Logger,
 	cfg reconcileConfig[T],
 	desc sourceDescriptor,
 	keep map[string]struct{},
@@ -280,6 +300,9 @@ func cleanupReplicas[T client.Object](
 				continue
 			}
 		}
+		auditLog(log, auditCleanup, modeAnnotation,
+			cfg.kind, desc.namespace, desc.name, obj.GetNamespace(),
+			"replica no longer in desired set; deleting")
 		if err := safeDelete(ctx, c, obj); err != nil {
 			return deleted, err
 		}

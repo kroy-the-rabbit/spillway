@@ -29,6 +29,8 @@ type ConfigMapReconciler struct {
 	// OrphanAuditInterval sets how often to scan for and delete orphaned replicas
 	// whose source no longer exists. Zero (default) disables the audit.
 	OrphanAuditInterval time.Duration
+	// Opts holds cluster-level security policy settings.
+	Opts Options
 
 	auditMu   sync.Mutex
 	lastAudit time.Time
@@ -75,7 +77,9 @@ func (r *ConfigMapReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, nil
 	}
 
-	result, err := reconcileObject(ctx, r.Client, log, r.Recorder, r.SelfHealInterval, configMapReconcileConfig(), &src)
+	cfg := configMapReconcileConfig()
+	cfg.Opts = r.Opts
+	result, err := reconcileObject(ctx, r.Client, log, r.Recorder, r.SelfHealInterval, cfg, &src)
 	if err != nil {
 		return result, err
 	}
@@ -149,7 +153,7 @@ func (r *ConfigMapReconciler) sourceRequestsForNamespace(ctx context.Context, ob
 		if isManagedReplica(src) {
 			continue
 		}
-		match, err := namespaceChangeAffectsSource(src, ns)
+		match, err := namespaceChangeAffectsSource(src, ns, r.Opts.ProtectedNamespaces)
 		if err != nil {
 			r.Log.V(1).Info("skipping namespace fan-out for configmap due to invalid selector", "configmap", client.ObjectKeyFromObject(src).String(), "error", err.Error())
 			continue

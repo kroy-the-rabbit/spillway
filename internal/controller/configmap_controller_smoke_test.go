@@ -418,7 +418,7 @@ func TestConfigMapReconcileSmoke_ForceAdopt(t *testing.T) {
 		unmanagedCM,
 	)
 
-	r := &ConfigMapReconciler{Client: c, Scheme: scheme, Log: log.Log.WithName("test"), Recorder: record.NewFakeRecorder(100)}
+	r := &ConfigMapReconciler{Client: c, Scheme: scheme, Log: log.Log.WithName("test"), Recorder: record.NewFakeRecorder(100), Opts: Options{AllowForceAdopt: true}}
 	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "platform", Name: "shared-config"}}); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}

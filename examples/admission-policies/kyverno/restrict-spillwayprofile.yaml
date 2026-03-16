@@ -1,0 +1,37 @@
+---
+# Kyverno ClusterPolicy: restrict who may create SpillwayProfile objects.
+#
+# SpillwayProfiles can trigger replication to any namespace matching their
+# targetNamespaces/targetSelector. Limit creation to platform-admin roles.
+#
+# Adjust the `clusterRoles` list to match your RBAC model.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: restrict-spillwayprofile-create
+  annotations:
+    policies.kyverno.io/title: Restrict SpillwayProfile creation
+    policies.kyverno.io/category: spillway
+    policies.kyverno.io/description: >
+      Only platform administrators may create or update SpillwayProfile objects.
+      SpillwayProfiles can replicate secrets and configmaps cluster-wide and
+      should be treated as privileged resources.
+spec:
+  validationFailureAction: Enforce
+  background: false
+  rules:
+    - name: require-platform-admin
+      match:
+        any:
+          - resources:
+              kinds:
+                - SpillwayProfile
+              operations:
+                - CREATE
+                - UPDATE
+      deny:
+        conditions:
+          all:
+            - key: "platform-admin"
+              operator: AnyNotIn
+              value: "{{ request.userInfo.clusterRoles }}"

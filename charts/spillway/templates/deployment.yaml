@@ -44,6 +44,14 @@ spec:
             - --sync-period={{ .Values.controller.syncPeriod }}
             - --self-heal-interval={{ default "45s" .Values.controller.selfHealInterval }}
             - --orphan-audit-interval={{ default "0s" .Values.controller.orphanAuditInterval }}
+            - --require-namespace-consent={{ .Values.controller.requireNamespaceConsent }}
+            - --allow-force-adopt={{ .Values.controller.allowForceAdopt }}
+            {{- if .Values.controller.protectedNamespaces }}
+            - --protected-namespaces={{ .Values.controller.protectedNamespaces }}
+            {{- end }}
+            {{- if .Values.controller.annotationDenyPrefixes }}
+            - --annotation-deny-prefixes={{ .Values.controller.annotationDenyPrefixes }}
+            {{- end }}
           ports:
             - name: metrics
               containerPort: 8080

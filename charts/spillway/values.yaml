@@ -59,6 +59,18 @@ controller:
   # -- Periodic audit interval for deleting orphaned annotation-managed replicas.
   # Set to 0 to disable.
   orphanAuditInterval: 0s
+  # -- When true, namespaces must explicitly opt in via the accept-from annotation
+  # to receive replicas (deny-by-default consent model).
+  requireNamespaceConsent: false
+  # -- When true, sources may use the force-adopt annotation to overwrite
+  # pre-existing unmanaged objects in target namespaces.
+  allowForceAdopt: false
+  # -- Comma-separated list of namespace names protected from wildcard replication.
+  # Defaults to kube-system when empty.
+  protectedNamespaces: ""
+  # -- Comma-separated annotation key prefixes that are never copied to replicas.
+  # Overrides the built-in default list when set.
+  annotationDenyPrefixes: ""
   # -- Address for the Prometheus metrics endpoint.
   metricsBindAddress: ":8080"
   # -- Address for the health and readiness probe endpoints.
@@ -173,6 +185,13 @@ networkPolicy:
   enabled: true
   # -- Extra ingress rules added to the NetworkPolicy (e.g. to allow specific scraper pods).
   ingress: []
+  # -- When true, add an Egress policyType and egress rules. The controller
+  # needs egress to the Kubernetes API server; set egress rules accordingly.
+  # When false (default), no egress policy is applied (platform-level policies apply).
+  egressEnabled: false
+  # -- Egress rules. Only used when egressEnabled is true.
+  # Example: allow kube-apiserver on port 6443 and DNS on port 53.
+  egress: []
 
 # -- Create the spillway-system namespace. Set to false if the namespace already exists
 # or is managed externally.

@@ -85,6 +85,8 @@ const (
 	configMapProfileRefFieldIdx    = "spillway.kroy.io/index.configmap-profile-ref"
 )
 
+// defaultProtectedNamespaces is the fallback when no Options are provided.
+// Production deployments should configure this via --protected-namespaces.
 var defaultProtectedNamespaces = map[string]struct{}{
 	"kube-system": {},
 }
@@ -312,20 +314,22 @@ func replicaIsExpired(obj metav1.Object) bool {
 // to receiving replicas from the given source kind/namespace/name.
 //
 // Supported formats for the AnnotationAcceptFrom value (comma-separated):
-//   - Absent annotation        → accept all (backward compatible default).
+//   - Absent annotation        → accept all when denyByDefault is false;
+//     deny all when denyByDefault is true (require-namespace-consent mode).
 //   - "all" or "*"             → explicitly accept all.
 //   - "Kind/namespace/name"    → match on kind, namespace, and name; each
 //     segment supports the "*" wildcard (e.g. "Secret/platform/*" or
 //     "*/ops/shared-token" or "*/*/*").
 //
 // When srcKind is empty the kind segment is matched permissively.
-func checkNamespaceConsentWithKind(ns *corev1.Namespace, srcKind, srcNamespace, srcName string) bool {
+func checkNamespaceConsentWithKind(ns *corev1.Namespace, srcKind, srcNamespace, srcName string, denyByDefault bool) bool {
 	if ns == nil {
-		return true
+		return !denyByDefault
 	}
 	raw := ns.GetAnnotations()[AnnotationAcceptFrom]
 	if raw == "" {
-		return true
+		// No annotation: honour the configured default consent mode.
+		return !denyByDefault
 	}
 	for _, token := range strings.Split(raw, ",") {
 		token = strings.TrimSpace(token)
@@ -362,8 +366,9 @@ func resolveTargetNamespacesWithoutConsent(
 	exclude targetSelector,
 	matchingSel labels.Selector,
 	sourceNamespace string,
+	opts Options,
 ) ([]string, error) {
-	return resolveTargetNamespacesInternal(ctx, c, include, exclude, matchingSel, "", sourceNamespace, "", false)
+	return resolveTargetNamespacesInternal(ctx, c, include, exclude, matchingSel, "", sourceNamespace, "", false, opts)
 }
 
 // ---------------------------------------------------------------------------
@@ -379,8 +384,9 @@ func resolveTargetNamespaces(
 	sourceKind string,
 	sourceNamespace string,
 	sourceName string,
+	opts Options,
 ) ([]string, error) {
-	return resolveTargetNamespacesInternal(ctx, c, include, exclude, matchingSel, sourceKind, sourceNamespace, sourceName, true)
+	return resolveTargetNamespacesInternal(ctx, c, include, exclude, matchingSel, sourceKind, sourceNamespace, sourceName, true, opts)
 }
 
 func resolveTargetNamespacesInternal(
@@ -393,10 +399,13 @@ func resolveTargetNamespacesInternal(
 	sourceNamespace string,
 	sourceName string,
 	enforceConsent bool,
+	opts Options,
 ) ([]string, error) {
 	if include.empty() && matchingSel == nil {
 		return nil, nil
 	}
+
+	protectedNS := opts.effectiveProtectedNamespaces()
 
 	// Fast path: explicit namespace targets only (no globs/all/label selector).
 	if !include.all && len(include.globs) == 0 && matchingSel == nil {
@@ -415,7 +424,7 @@ func resolveTargetNamespacesInternal(
 				}
 				return nil, err
 			}
-			if enforceConsent && !checkNamespaceConsentWithKind(&ns, sourceKind, sourceNamespace, sourceName) {
+			if enforceConsent && !checkNamespaceConsentWithKind(&ns, sourceKind, sourceNamespace, sourceName, opts.RequireNamespaceConsent) {
 				continue
 			}
 			out = append(out, nsName)
@@ -443,14 +452,14 @@ func resolveTargetNamespacesInternal(
 			continue
 		}
 
-		// kube-system protection: bypassed by explicit exact name OR label match.
-		if _, protected := defaultProtectedNamespaces[nsName]; protected && !include.hasExact(nsName) && !labelMatch {
+		// Protected namespace guard: bypassed by explicit exact name OR label match.
+		if _, protected := protectedNS[nsName]; protected && !include.hasExact(nsName) && !labelMatch {
 			continue
 		}
 		if exclude.matchesNamespace(nsName) {
 			continue
 		}
-		if enforceConsent && !checkNamespaceConsentWithKind(ns, sourceKind, sourceNamespace, sourceName) {
+		if enforceConsent && !checkNamespaceConsentWithKind(ns, sourceKind, sourceNamespace, sourceName, opts.RequireNamespaceConsent) {
 			continue
 		}
 		out = append(out, nsName)
@@ -465,6 +474,7 @@ func namespaceMatchesTargeting(
 	exclude targetSelector,
 	matchingSel labels.Selector,
 	sourceNamespace string,
+	protectedNS map[string]struct{},
 ) bool {
 	if ns == nil {
 		return false
@@ -479,7 +489,10 @@ func namespaceMatchesTargeting(
 	if !nameMatch && !labelMatch {
 		return false
 	}
-	if _, protected := defaultProtectedNamespaces[nsName]; protected && !include.hasExact(nsName) && !labelMatch {
+	if len(protectedNS) == 0 {
+		protectedNS = defaultProtectedNamespaces
+	}
+	if _, protected := protectedNS[nsName]; protected && !include.hasExact(nsName) && !labelMatch {
 		return false
 	}
 	if exclude.matchesNamespace(nsName) {
@@ -520,10 +533,27 @@ func copyByteMap(in map[string][]byte) map[string][]byte {
 	return out
 }
 
-func filteredAnnotations(source map[string]string) map[string]string {
+// filteredAnnotations copies source annotations onto replicas, stripping:
+//   - all spillway.kroy.io/* control annotations
+//   - any annotation whose key starts with a prefix in denyPrefixes
+//
+// This prevents policy engine, injector, and workload controller annotations
+// from leaking across namespace boundaries via replicas. Pass nil denyPrefixes
+// to use only the built-in spillway prefix filter (legacy behaviour).
+func filteredAnnotations(source map[string]string, denyPrefixes []string) map[string]string {
 	out := map[string]string{}
 	for k, v := range source {
 		if strings.HasPrefix(k, "spillway.kroy.io/") {
+			continue
+		}
+		denied := false
+		for _, pfx := range denyPrefixes {
+			if strings.HasPrefix(k, pfx) {
+				denied = true
+				break
+			}
+		}
+		if denied {
 			continue
 		}
 		out[k] = v
@@ -587,8 +617,8 @@ type sourceDescriptor struct {
 	name      string
 }
 
-func (d sourceDescriptor) targetAnnotations(sourceAnnotations map[string]string) map[string]string {
-	ann := filteredAnnotations(sourceAnnotations)
+func (d sourceDescriptor) targetAnnotations(sourceAnnotations map[string]string, denyPrefixes []string) map[string]string {
+	ann := filteredAnnotations(sourceAnnotations, denyPrefixes)
 	ann[AnnotationManagedBy] = ManagedByValue
 	ann[AnnotationSourceFrom] = d.sourceFrom()
 	return ann
@@ -791,7 +821,7 @@ func mapsEqual(a, b map[string]string) bool {
 // Source annotation helpers
 // ---------------------------------------------------------------------------
 
-func namespaceChangeAffectsSource(obj metav1.Object, ns *corev1.Namespace) (bool, error) {
+func namespaceChangeAffectsSource(obj metav1.Object, ns *corev1.Namespace, protectedNS map[string]struct{}) (bool, error) {
 	include := listTargetSelector(obj)
 	exclude := listExcludeSelector(obj)
 	matchingSel, err := listMatchingSelector(obj)
@@ -801,7 +831,7 @@ func namespaceChangeAffectsSource(obj metav1.Object, ns *corev1.Namespace) (bool
 	if include.empty() && matchingSel == nil {
 		return false, nil
 	}
-	return namespaceMatchesTargeting(ns, include, exclude, matchingSel, obj.GetNamespace()), nil
+	return namespaceMatchesTargeting(ns, include, exclude, matchingSel, obj.GetNamespace(), protectedNS), nil
 }
 
 func replicaSourceFieldIndexValue(obj metav1.Object) []string {

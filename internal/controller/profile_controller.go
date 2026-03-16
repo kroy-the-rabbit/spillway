@@ -45,6 +45,8 @@ type ProfileReconciler struct {
 	Log              logr.Logger
 	Recorder         record.EventRecorder
 	SelfHealInterval time.Duration
+	// Opts holds cluster-level security policy settings.
+	Opts Options
 }
 
 func (r *ProfileReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -98,7 +100,7 @@ func (r *ProfileReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 
 	// Resolve candidate target namespaces first, then enforce accept-from per source.
-	targets, err := resolveTargetNamespacesWithoutConsent(ctx, r.Client, include, exclude, matchingSel, profile.Namespace)
+	targets, err := resolveTargetNamespacesWithoutConsent(ctx, r.Client, include, exclude, matchingSel, profile.Namespace, r.Opts)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -229,7 +231,7 @@ func (r *ProfileReconciler) syncProfileSecret(
 		if err := r.Get(ctx, client.ObjectKey{Name: ns}, &nsObj); err != nil {
 			return changed, false, err
 		}
-		if !checkNamespaceConsentWithKind(&nsObj, "Secret", profile.Namespace, srcName) {
+		if !checkNamespaceConsentWithKind(&nsObj, "Secret", profile.Namespace, srcName, r.Opts.RequireNamespaceConsent) {
 			log.Info("skipping profile secret", "namespace", ns, "name", srcName, "reason", "namespace consent denies source")
 			continue
 		}
@@ -303,7 +305,7 @@ func (r *ProfileReconciler) syncProfileConfigMap(
 		if err := r.Get(ctx, client.ObjectKey{Name: ns}, &nsObj); err != nil {
 			return changed, false, err
 		}
-		if !checkNamespaceConsentWithKind(&nsObj, "ConfigMap", profile.Namespace, srcName) {
+		if !checkNamespaceConsentWithKind(&nsObj, "ConfigMap", profile.Namespace, srcName, r.Opts.RequireNamespaceConsent) {
 			log.Info("skipping profile configmap", "namespace", ns, "name", srcName, "reason", "namespace consent denies source")
 			continue
 		}

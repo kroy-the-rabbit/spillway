@@ -1,0 +1,69 @@
+---
+# Kyverno ClusterPolicy: restrict who may set spillway replication annotations.
+#
+# By default, any user who can create or update a Secret or ConfigMap can
+# trigger cross-namespace replication. This policy limits replication
+# annotations to subjects with the "spillway-source" ClusterRole.
+#
+# Adjust the `clusterRoles` list to match your RBAC model.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: restrict-spillway-replication-annotations
+  annotations:
+    policies.kyverno.io/title: Restrict spillway replication annotations
+    policies.kyverno.io/category: spillway
+    policies.kyverno.io/description: >
+      Only authorised principals may set spillway.kroy.io/replicate-to,
+      spillway.kroy.io/replicate-to-matching, or spillway.kroy.io/force-adopt
+      on Secrets and ConfigMaps.
+spec:
+  validationFailureAction: Enforce
+  background: false
+  rules:
+    - name: restrict-replicate-to
+      match:
+        any:
+          - resources:
+              kinds:
+                - Secret
+                - ConfigMap
+              operations:
+                - CREATE
+                - UPDATE
+      preconditions:
+        any:
+          - key: "{{ request.object.metadata.annotations.\"spillway.kroy.io/replicate-to\" || '' }}"
+            operator: NotEquals
+            value: ""
+          - key: "{{ request.object.metadata.annotations.\"spillway.kroy.io/replicate-to-matching\" || '' }}"
+            operator: NotEquals
+            value: ""
+      deny:
+        conditions:
+          all:
+            - key: "spillway-source"
+              operator: AnyNotIn
+              value: "{{ request.userInfo.clusterRoles }}"
+
+    - name: restrict-force-adopt
+      match:
+        any:
+          - resources:
+              kinds:
+                - Secret
+                - ConfigMap
+              operations:
+                - CREATE
+                - UPDATE
+      preconditions:
+        any:
+          - key: "{{ request.object.metadata.annotations.\"spillway.kroy.io/force-adopt\" || '' }}"
+            operator: NotEquals
+            value: ""
+      deny:
+        conditions:
+          all:
+            - key: "spillway-admin"
+              operator: AnyNotIn
+              value: "{{ request.userInfo.clusterRoles }}"

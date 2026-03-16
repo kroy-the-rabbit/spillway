@@ -24,13 +24,17 @@ var version = "dev"
 
 func main() {
 	var (
-		metricsAddr          string
-		probeAddr            string
-		enableLeaderElection bool
-		syncPeriod           time.Duration
-		selfHealInterval     time.Duration
-		orphanAuditInterval  time.Duration
-		printVersion         bool
+		metricsAddr               string
+		probeAddr                 string
+		enableLeaderElection      bool
+		syncPeriod                time.Duration
+		selfHealInterval          time.Duration
+		orphanAuditInterval       time.Duration
+		printVersion              bool
+		protectedNamespaces       string
+		requireNamespaceConsent   bool
+		allowForceAdopt           bool
+		annotationDenyPrefixes    string
 	)
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
@@ -40,6 +44,10 @@ func main() {
 	flag.DurationVar(&selfHealInterval, "self-heal-interval", 45*time.Second, "Per-object self-heal fallback requeue interval (0 to disable).")
 	flag.DurationVar(&orphanAuditInterval, "orphan-audit-interval", 0, "Periodic audit interval for deleting orphaned annotation-managed replicas (0 to disable).")
 	flag.BoolVar(&printVersion, "version", false, "Print version and exit.")
+	flag.StringVar(&protectedNamespaces, "protected-namespaces", "", "Comma-separated list of namespace names protected from wildcard replication (default: kube-system).")
+	flag.BoolVar(&requireNamespaceConsent, "require-namespace-consent", false, "Deny-by-default: namespaces must opt in via accept-from annotation to receive replicas.")
+	flag.BoolVar(&allowForceAdopt, "allow-force-adopt", false, "Allow sources with force-adopt annotation to overwrite pre-existing unmanaged objects.")
+	flag.StringVar(&annotationDenyPrefixes, "annotation-deny-prefixes", "", "Comma-separated annotation key prefixes never copied to replicas (overrides built-in defaults when set).")
 	opts := zap.Options{Development: false}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
@@ -50,6 +58,17 @@ func main() {
 	}
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+
+	ctrlOpts := controller.Options{
+		RequireNamespaceConsent: requireNamespaceConsent,
+		AllowForceAdopt:         allowForceAdopt,
+	}
+	if protectedNamespaces != "" {
+		ctrlOpts.ProtectedNamespaces = controller.ParseProtectedNamespaces(protectedNamespaces)
+	}
+	if annotationDenyPrefixes != "" {
+		ctrlOpts.AnnotationDenyPrefixes = controller.ParseAnnotationDenyPrefixes(annotationDenyPrefixes)
+	}
 
 	scheme := runtime.NewScheme()
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
@@ -76,6 +95,7 @@ func main() {
 		Recorder:            mgr.GetEventRecorderFor("spillway"),
 		SelfHealInterval:    selfHealInterval,
 		OrphanAuditInterval: orphanAuditInterval,
+		Opts:                ctrlOpts,
 	}).SetupWithManager(mgr); err != nil {
 		ctrl.Log.Error(err, "unable to create secret controller")
 		os.Exit(1)
@@ -88,6 +108,7 @@ func main() {
 		Recorder:            mgr.GetEventRecorderFor("spillway"),
 		SelfHealInterval:    selfHealInterval,
 		OrphanAuditInterval: orphanAuditInterval,
+		Opts:                ctrlOpts,
 	}).SetupWithManager(mgr); err != nil {
 		ctrl.Log.Error(err, "unable to create configmap controller")
 		os.Exit(1)
@@ -99,6 +120,7 @@ func main() {
 		Log:              ctrl.Log.WithName("controllers").WithName("profile"),
 		Recorder:         mgr.GetEventRecorderFor("spillway"),
 		SelfHealInterval: selfHealInterval,
+		Opts:             ctrlOpts,
 	}).SetupWithManager(mgr); err != nil {
 		ctrl.Log.Error(err, "unable to create profile controller")
 		os.Exit(1)

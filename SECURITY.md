@@ -52,6 +52,27 @@ metrics ingress to pods in the release namespace; add explicit
 
 ### Supply chain
 
-Container images are published to `ghcr.io/kroy-the-rabbit/spillway` and
-signed via the release workflow. Verify image digests against the GitHub
-release checksums before deploying in sensitive environments.
+Container images are published to `ghcr.io/kroy-the-rabbit/spillway`.
+Images are **not yet signed** — cosign signing and SBOM generation are
+planned but not yet implemented. Pin to a specific image digest or tag
+rather than `latest` and verify the digest matches the GitHub release
+before deploying in sensitive environments.
+
+GitHub Actions workflows are pinned to commit SHAs to prevent silent
+supply chain updates.
+
+### Authorization model
+
+By default, any namespace can receive replicas from any source
+(allow-by-default). For environments that require explicit namespace
+opt-in, run the controller with `--require-namespace-consent`. Namespaces
+must then set the `spillway.kroy.io/accept-from` annotation to receive
+replicas.
+
+Protected namespaces (default: `kube-system`) cannot be targeted by
+wildcard or label-selector replication unless named explicitly.
+Use `--protected-namespaces` to extend this list.
+
+The `force-adopt` annotation is disabled by default. Enable it only with
+`--allow-force-adopt` and after reviewing admission policies to limit who
+may set this annotation.

@@ -1,0 +1,76 @@
+---
+# Kyverno ClusterPolicy: block wildcard namespace targeting for non-admins.
+#
+# The value "all" in replicate-to targets every namespace. This policy
+# prevents non-admins from using wildcard targeting while still allowing
+# explicit namespace names.
+#
+# Adjust `clusterRoles` and the pattern as needed.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: restrict-spillway-wildcard-targets
+  annotations:
+    policies.kyverno.io/title: Restrict spillway wildcard namespace targeting
+    policies.kyverno.io/category: spillway
+    policies.kyverno.io/description: >
+      Prevents non-admin users from using "all", "*", or glob patterns in
+      spillway.kroy.io/replicate-to. Explicit namespace names are still allowed.
+spec:
+  validationFailureAction: Enforce
+  background: false
+  rules:
+    - name: deny-wildcard-replicate-to
+      match:
+        any:
+          - resources:
+              kinds:
+                - Secret
+                - ConfigMap
+              operations:
+                - CREATE
+                - UPDATE
+      preconditions:
+        any:
+          - key: "{{ request.object.metadata.annotations.\"spillway.kroy.io/replicate-to\" || '' }}"
+            operator: NotEquals
+            value: ""
+      deny:
+        conditions:
+          all:
+            # Block "all" or any value containing a glob character (* ?)
+            - key: "{{ request.object.metadata.annotations.\"spillway.kroy.io/replicate-to\" }}"
+              operator: AnyIn
+              value:
+                - "all"
+                - "All"
+                - "ALL"
+            - key: "spillway-admin"
+              operator: AnyNotIn
+              value: "{{ request.userInfo.clusterRoles }}"
+
+    - name: deny-wildcard-replicate-to-matching
+      match:
+        any:
+          - resources:
+              kinds:
+                - Secret
+                - ConfigMap
+              operations:
+                - CREATE
+                - UPDATE
+      preconditions:
+        any:
+          - key: "{{ request.object.metadata.annotations.\"spillway.kroy.io/replicate-to-matching\" || '' }}"
+            operator: NotEquals
+            value: ""
+      deny:
+        conditions:
+          all:
+            # Block overly broad selectors that match every namespace (empty string = match all)
+            - key: "{{ request.object.metadata.annotations.\"spillway.kroy.io/replicate-to-matching\" }}"
+              operator: Equals
+              value: ""
+            - key: "spillway-admin"
+              operator: AnyNotIn
+              value: "{{ request.userInfo.clusterRoles }}"

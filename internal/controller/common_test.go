@@ -41,7 +41,7 @@ func TestResolveTargetNamespaces_DefaultProtectedAndExclude(t *testing.T) {
 	include := parseTargetSelector("all")
 	exclude := parseTargetSelector("team-dev")
 
-	got, err := resolveTargetNamespaces(context.Background(), c, include, exclude, nil, "Secret", "source", "")
+	got, err := resolveTargetNamespaces(context.Background(), c, include, exclude, nil, "Secret", "source", "", Options{})
 	if err != nil {
 		t.Fatalf("resolve targets: %v", err)
 	}
@@ -68,7 +68,7 @@ func TestResolveTargetNamespaces_ExplicitKubeSystemOverride(t *testing.T) {
 		&corev1.Namespace{ObjectMeta: objectMeta("kube-system")},
 	).Build()
 
-	got, err := resolveTargetNamespaces(context.Background(), c, parseTargetSelector("kube-* , kube-system"), targetSelector{}, nil, "Secret", "source", "")
+	got, err := resolveTargetNamespaces(context.Background(), c, parseTargetSelector("kube-* , kube-system"), targetSelector{}, nil, "Secret", "source", "", Options{})
 	if err != nil {
 		t.Fatalf("resolve targets: %v", err)
 	}
@@ -94,7 +94,7 @@ func TestResolveTargetNamespaces_LabelSelector(t *testing.T) {
 		t.Fatalf("parse label selector: %v", err)
 	}
 
-	got, err := resolveTargetNamespaces(context.Background(), c, targetSelector{}, targetSelector{}, sel, "Secret", "source", "")
+	got, err := resolveTargetNamespaces(context.Background(), c, targetSelector{}, targetSelector{}, sel, "Secret", "source", "", Options{})
 	if err != nil {
 		t.Fatalf("resolve targets: %v", err)
 	}
@@ -121,7 +121,7 @@ func TestResolveTargetNamespaces_LabelSelectorWithExclude(t *testing.T) {
 	}
 	exclude := parseTargetSelector("team-b")
 
-	got, err := resolveTargetNamespaces(context.Background(), c, targetSelector{}, exclude, sel, "Secret", "source", "")
+	got, err := resolveTargetNamespaces(context.Background(), c, targetSelector{}, exclude, sel, "Secret", "source", "", Options{})
 	if err != nil {
 		t.Fatalf("resolve targets: %v", err)
 	}
@@ -149,7 +149,7 @@ func TestResolveTargetNamespaces_LabelAndNameUnion(t *testing.T) {
 	}
 	include := parseTargetSelector("explicit-ns")
 
-	got, err := resolveTargetNamespaces(context.Background(), c, include, targetSelector{}, sel, "Secret", "source", "")
+	got, err := resolveTargetNamespaces(context.Background(), c, include, targetSelector{}, sel, "Secret", "source", "", Options{})
 	if err != nil {
 		t.Fatalf("resolve targets: %v", err)
 	}
@@ -180,7 +180,7 @@ func TestResolveTargetNamespaces_LabelSelectorKubeSystemBypass(t *testing.T) {
 		t.Fatalf("parse label selector: %v", err)
 	}
 
-	got, err := resolveTargetNamespaces(context.Background(), c, targetSelector{}, targetSelector{}, sel, "Secret", "source", "")
+	got, err := resolveTargetNamespaces(context.Background(), c, targetSelector{}, targetSelector{}, sel, "Secret", "source", "", Options{})
 	if err != nil {
 		t.Fatalf("resolve targets: %v", err)
 	}
@@ -259,7 +259,7 @@ func TestNamespaceChangeAffectsSource_NameSelector(t *testing.T) {
 	}
 	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "team-a"}}
 
-	got, err := namespaceChangeAffectsSource(src, ns)
+	got, err := namespaceChangeAffectsSource(src, ns, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -310,7 +310,7 @@ func TestNamespaceChangeAffectsSource_LabelSelectorAndExclude(t *testing.T) {
 		},
 	}
 
-	got, err := namespaceChangeAffectsSource(src, matchNS)
+	got, err := namespaceChangeAffectsSource(src, matchNS, nil)
 	if err != nil {
 		t.Fatalf("unexpected error for match namespace: %v", err)
 	}
@@ -318,7 +318,7 @@ func TestNamespaceChangeAffectsSource_LabelSelectorAndExclude(t *testing.T) {
 		t.Fatal("expected label-matching namespace to affect source")
 	}
 
-	got, err = namespaceChangeAffectsSource(src, excludedNS)
+	got, err = namespaceChangeAffectsSource(src, excludedNS, nil)
 	if err != nil {
 		t.Fatalf("unexpected error for excluded namespace: %v", err)
 	}
@@ -362,7 +362,7 @@ func TestNamespaceChangeAffectsSource_ProtectedNamespaceRequiresExplicitOrLabelM
 		},
 	}
 
-	got, err := namespaceChangeAffectsSource(srcWildcard, kubeSystem)
+	got, err := namespaceChangeAffectsSource(srcWildcard, kubeSystem, nil)
 	if err != nil {
 		t.Fatalf("unexpected error for wildcard source: %v", err)
 	}
@@ -370,7 +370,7 @@ func TestNamespaceChangeAffectsSource_ProtectedNamespaceRequiresExplicitOrLabelM
 		t.Fatal("expected kube-system to be protected from wildcard-only targeting")
 	}
 
-	got, err = namespaceChangeAffectsSource(srcExplicit, kubeSystem)
+	got, err = namespaceChangeAffectsSource(srcExplicit, kubeSystem, nil)
 	if err != nil {
 		t.Fatalf("unexpected error for explicit source: %v", err)
 	}
@@ -378,7 +378,7 @@ func TestNamespaceChangeAffectsSource_ProtectedNamespaceRequiresExplicitOrLabelM
 		t.Fatal("expected explicit kube-system targeting to bypass protection")
 	}
 
-	got, err = namespaceChangeAffectsSource(srcLabel, kubeSystem)
+	got, err = namespaceChangeAffectsSource(srcLabel, kubeSystem, nil)
 	if err != nil {
 		t.Fatalf("unexpected error for label source: %v", err)
 	}
@@ -399,7 +399,7 @@ func TestNamespaceChangeAffectsSource_InvalidSelectorReturnsError(t *testing.T) 
 	}
 	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "team-a"}}
 
-	if _, err := namespaceChangeAffectsSource(src, ns); err == nil {
+	if _, err := namespaceChangeAffectsSource(src, ns, nil); err == nil {
 		t.Fatal("expected invalid selector error, got nil")
 	}
 }
