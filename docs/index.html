@@ -3,412 +3,832 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>spillway</title>
+  <title>spillway — Kubernetes secret replication</title>
   <meta name="description" content="Replicate Kubernetes Secrets and ConfigMaps across namespaces via annotations or declarative profiles.">
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <style>
     :root {
-      --bg:       #0f172a;
-      --surface:  #1e293b;
-      --border:   #334155;
-      --text:     #e2e8f0;
-      --muted:    #94a3b8;
-      --accent:   #38bdf8;
-      --code-bg:  #1e293b;
-      --green:    #4ade80;
+      --bg:       #07090f;
+      --panel:    #0d1420;
+      --border:   #192840;
+      --text:     #dce9f7;
+      --muted:    #4a6d8a;
+      --cyan:     #00c8f0;
+      --cyan-dim: rgba(0,200,240,0.08);
+      --green:    #00e89a;
+      --amber:    #f0a040;
+      --code-bg:  #09111c;
+      --r:        10px;
     }
 
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
 
     body {
       background: var(--bg);
       color: var(--text);
       font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
       font-size: 1rem;
-      line-height: 1.65;
+      line-height: 1.7;
+      overflow-x: hidden;
     }
 
-    a { color: var(--accent); text-decoration: none; }
+    a { color: var(--cyan); text-decoration: none; }
     a:hover { text-decoration: underline; }
 
-    .wrap {
-      max-width: 700px;
+    /* ── Layout ── */
+    .container {
+      max-width: 860px;
       margin: 0 auto;
-      padding: 0 1.5rem;
+      padding: 0 1.75rem;
     }
 
-    /* ── Header ── */
-    header {
-      padding: 4.5rem 0 2.5rem;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      text-align: center;
-      gap: 1rem;
-    }
-
-    header img {
-      width: 88px;
-      height: 88px;
-    }
-
-    h1 {
-      font-size: 2.6rem;
-      font-weight: 800;
-      letter-spacing: -0.04em;
-      color: var(--accent);
-    }
-
-    .tagline {
-      color: var(--muted);
-      font-size: 1.05rem;
-      max-width: 520px;
-    }
-
-    /* ── Sections ── */
-    section {
-      padding: 2.25rem 0;
+    /* ── Section dividers ── */
+    .section {
+      padding: 5.5rem 0;
       border-top: 1px solid var(--border);
     }
 
-    h2 {
-      font-size: 0.78rem;
-      font-weight: 700;
+    .section-label {
+      font-family: ui-monospace, "Cascadia Code", monospace;
+      font-size: 0.68rem;
       text-transform: uppercase;
-      letter-spacing: 0.1em;
-      color: var(--muted);
-      margin-bottom: 1rem;
+      letter-spacing: 0.18em;
+      color: var(--cyan);
+      opacity: 0.7;
+      margin-bottom: 2rem;
     }
 
-    h3 {
+    /* ─────────────────────── HERO ─────────────────────── */
+    .hero {
+      min-height: 100svh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 4rem 1.5rem 5rem;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .hero::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background:
+        radial-gradient(ellipse 70% 50% at 50% 38%, rgba(0,200,240,0.07) 0%, transparent 65%),
+        radial-gradient(ellipse 40% 20% at 50% 60%, rgba(0,200,240,0.03) 0%, transparent 60%);
+      pointer-events: none;
+    }
+
+    /* namespace graph */
+    .ns-graph {
+      width: min(540px, 92vw);
+      height: auto;
+      display: block;
+      margin: 0 auto 2.8rem;
+    }
+
+    /* wordmark */
+    .wordmark {
+      font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace;
+      font-size: clamp(3.2rem, 11vw, 7.5rem);
+      font-weight: 700;
+      letter-spacing: -0.035em;
+      line-height: 1;
+      color: var(--text);
+      margin-bottom: 1rem;
+    }
+    .wordmark .w { color: var(--cyan); }
+
+    .hero-sub {
+      color: var(--muted);
+      font-size: clamp(0.88rem, 2vw, 1.05rem);
+      max-width: 460px;
+      margin: 0 auto 2.75rem;
+      line-height: 1.6;
+    }
+
+    /* install strip */
+    .install {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.75rem;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      padding: 0.75rem 1.25rem;
+      font-family: ui-monospace, "Cascadia Code", monospace;
+      font-size: clamp(0.72rem, 1.8vw, 0.85rem);
+      color: var(--text);
+      white-space: nowrap;
+      overflow-x: auto;
+      max-width: 96vw;
+    }
+    .install .ps { color: var(--cyan); user-select: none; }
+
+    /* scroll nudge */
+    .scroll-nudge {
+      position: absolute;
+      bottom: 2.2rem;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.35rem;
+      color: var(--muted);
+      font-size: 0.65rem;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      opacity: 0;
+      animation: nudgeFadeIn 0.6s ease-out 3.5s forwards;
+    }
+    .scroll-nudge svg {
+      width: 18px; height: 18px;
+      animation: nudgeBounce 1.6s ease-in-out infinite;
+    }
+    @keyframes nudgeFadeIn {
+      to { opacity: 0.45; }
+    }
+    @keyframes nudgeBounce {
+      0%, 100% { transform: translateY(0); }
+      50%       { transform: translateY(5px); }
+    }
+
+    /* ── SVG animations ── */
+    .flow-bg {
+      fill: none;
+      stroke: var(--cyan);
+      stroke-width: 1.5;
+      stroke-linecap: round;
+      opacity: 0;
+      animation: lineReveal 1.2s ease-out forwards;
+    }
+    .flow-bg.dl { animation-delay: 0.2s; }
+    .flow-bg.dc { animation-delay: 0.3s; }
+    .flow-bg.dr { animation-delay: 0.4s; }
+
+    @keyframes lineReveal {
+      to { opacity: 0.22; }
+    }
+
+    .src-ring {
+      fill: var(--cyan);
+      transform-origin: 50% 50%;
+      transform-box: fill-box;
+      animation: srcPulse 3s ease-in-out infinite;
+    }
+    @keyframes srcPulse {
+      0%, 100% { opacity: 0.06; r: 44; }
+      50%       { opacity: 0.14; r: 54; }
+    }
+
+    .src-glow {
+      animation: glowReveal 0.5s ease-out 0s both;
+    }
+    .tgt-node {
+      animation: nodeReveal 0.4s ease-out 1.6s both;
+    }
+    .tgt-node:nth-child(2) { animation-delay: 1.65s; }
+    .tgt-node:nth-child(3) { animation-delay: 1.7s; }
+
+    @keyframes glowReveal {
+      from { opacity: 0; }
+      to   { opacity: 1; }
+    }
+    @keyframes nodeReveal {
+      from { opacity: 0; transform: scale(0.6); transform-origin: center; transform-box: fill-box; }
+      to   { opacity: 1; transform: scale(1); }
+    }
+
+    /* ─────────────────── CONCEPT ─────────────────── */
+    .concept-split {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 5rem;
+      align-items: start;
+    }
+    @media (max-width: 640px) {
+      .concept-split { grid-template-columns: 1fr; gap: 2.5rem; }
+    }
+
+    .pull {
+      font-size: clamp(1.65rem, 4vw, 2.3rem);
+      font-weight: 800;
+      letter-spacing: -0.035em;
+      line-height: 1.12;
+      color: var(--text);
+    }
+    .pull em {
+      font-style: normal;
+      color: var(--cyan);
+    }
+
+    .body-text p {
+      color: var(--muted);
+      font-size: 0.93rem;
+      margin-bottom: 0.9rem;
+    }
+    .body-text p:last-child { margin-bottom: 0; }
+
+    /* ─────────────────── FEATURES ─────────────────── */
+    .feat-row {
+      display: grid;
+      grid-template-columns: 4rem 1fr;
+      gap: 1.5rem;
+      padding: 2.2rem 0;
+      border-bottom: 1px solid var(--border);
+      align-items: start;
+    }
+    .feat-row:first-child { border-top: 1px solid var(--border); }
+
+    .feat-n {
+      font-family: ui-monospace, monospace;
+      font-size: 0.65rem;
+      letter-spacing: 0.14em;
+      color: var(--muted);
+      padding-top: 0.25rem;
+      opacity: 0.6;
+    }
+
+    .feat-body h3 {
       font-size: 1rem;
       font-weight: 700;
       color: var(--text);
-      margin: 1.4rem 0 0.5rem;
+      margin-bottom: 0.35rem;
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      flex-wrap: wrap;
     }
-    h3:first-child { margin-top: 0; }
+    .badge {
+      font-size: 0.6rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      padding: 0.1em 0.55em;
+      border-radius: 20px;
+      background: rgba(240,160,64,0.12);
+      color: var(--amber);
+      border: 1px solid rgba(240,160,64,0.25);
+    }
+    .feat-body p {
+      font-size: 0.88rem;
+      color: var(--muted);
+      line-height: 1.65;
+    }
 
-    p { margin-bottom: 0.9rem; }
-    p:last-child { margin-bottom: 0; }
+    /* ─────────────────── CODE BLOCKS ─────────────────── */
+    .code-section {
+      padding: 5.5rem 0;
+      border-top: 1px solid var(--border);
+    }
 
-    /* ── Inline code ── */
-    code {
-      font-family: ui-monospace, "Cascadia Code", "Fira Code", Menlo, monospace;
-      font-size: 0.85em;
+    .code-split {
+      display: grid;
+      grid-template-columns: 1fr 1.1fr;
+      gap: 3rem;
+      align-items: start;
+    }
+    .code-split + .code-split { margin-top: 4rem; }
+
+    @media (max-width: 640px) {
+      .code-split { grid-template-columns: 1fr; gap: 1.5rem; }
+    }
+
+    .code-prose h3 {
+      font-size: 1.05rem;
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: 0.65rem;
+    }
+    .code-prose p {
+      font-size: 0.88rem;
+      color: var(--muted);
+      line-height: 1.65;
+      margin-bottom: 0.7rem;
+    }
+    .code-prose p:last-child { margin-bottom: 0; }
+
+    /* terminal window */
+    .term {
       background: var(--code-bg);
-      color: var(--accent);
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      overflow: hidden;
+    }
+    .term-bar {
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      padding: 0.6rem 1rem;
+      display: flex;
+      align-items: center;
+      gap: 0.45rem;
+    }
+    .dot { width: 11px; height: 11px; border-radius: 50%; flex-shrink: 0; }
+    .d-r { background: #ff5f56; }
+    .d-y { background: #ffbc2e; }
+    .d-g { background: #28c840; }
+    .term-file {
+      margin-left: auto;
+      font-family: ui-monospace, monospace;
+      font-size: 0.68rem;
+      color: var(--muted);
+      letter-spacing: 0.04em;
+    }
+    .term pre {
+      padding: 1.25rem 1.4rem;
+      overflow-x: auto;
+      font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace;
+      font-size: 0.81rem;
+      line-height: 1.65;
+      color: var(--text);
+    }
+    .term pre .c { color: var(--muted); font-style: italic; } /* comment */
+    .term pre .k { color: var(--cyan); }                       /* key / keyword */
+    .term pre .v { color: var(--green); }                      /* value */
+    .term pre .a { color: var(--amber); }                      /* annotation value */
+
+    /* ─────────────────── TABLE ─────────────────── */
+    .tbl-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      margin-top: 1.5rem;
+    }
+    table { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
+    thead th {
+      background: var(--panel);
+      padding: 0.65rem 1.1rem;
+      text-align: left;
+      font-family: ui-monospace, monospace;
+      font-size: 0.67rem;
+      text-transform: uppercase;
+      letter-spacing: 0.14em;
+      color: var(--muted);
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+    }
+    td {
+      padding: 0.75rem 1.1rem;
+      vertical-align: top;
+      border-bottom: 1px solid var(--border);
+    }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: var(--cyan-dim); }
+
+    td code {
+      font-family: ui-monospace, monospace;
+      font-size: 0.77rem;
+      background: var(--code-bg);
+      color: var(--cyan);
+      padding: 0.15em 0.45em;
+      border-radius: 4px;
+      border: 1px solid var(--border);
+      white-space: nowrap;
+    }
+    .muted-td { color: var(--muted); }
+
+    .note {
+      font-size: 0.82rem;
+      color: var(--muted);
+      margin-top: 1.1rem;
+      padding-left: 1rem;
+      border-left: 2px solid var(--border);
+      line-height: 1.65;
+    }
+
+    /* inline code (outside code blocks) */
+    p code, li code, td:first-child code {
+      font-family: ui-monospace, monospace;
+      font-size: 0.84em;
+      background: var(--panel);
+      color: var(--cyan);
       padding: 0.15em 0.45em;
       border-radius: 4px;
       border: 1px solid var(--border);
     }
 
-    /* ── Code blocks ── */
-    pre {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 1.1rem 1.4rem;
-      overflow-x: auto;
-      margin: 0.9rem 0;
-      line-height: 1.55;
-    }
+    strong { color: var(--text); }
+    em { color: var(--muted); }
 
-    pre code {
-      background: none;
-      border: none;
-      padding: 0;
-      font-size: 0.875rem;
-      color: var(--text);
-    }
-
-    /* ── Feature cards ── */
-    .features {
-      display: grid;
-      gap: 0.75rem;
-      margin-top: 0.5rem;
-    }
-
-    .feature {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 1rem 1.2rem;
-    }
-
-    .feature-title {
-      font-weight: 700;
-      color: var(--text);
-      margin-bottom: 0.2rem;
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-    }
-
-    .feature-title .pill {
-      font-size: 0.65rem;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      background: #0c4a6e;
-      color: var(--accent);
-      border-radius: 20px;
-      padding: 0.1em 0.55em;
-    }
-
-    .feature p {
-      color: var(--muted);
-      font-size: 0.9rem;
-      margin-bottom: 0;
-    }
-
-    /* ── Annotation table ── */
-    .table-wrap {
-      overflow-x: auto;
-      margin: 0.5rem 0;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-    }
-
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 0.875rem;
-    }
-
-    th {
-      text-align: left;
-      padding: 0.6rem 1rem;
-      background: var(--surface);
-      color: var(--muted);
-      font-weight: 600;
-      font-size: 0.78rem;
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-      border-bottom: 1px solid var(--border);
-    }
-
-    td {
-      padding: 0.65rem 1rem;
-      border-bottom: 1px solid var(--border);
-      vertical-align: top;
-    }
-
-    tr:last-child td { border-bottom: none; }
-
-    td:first-child code {
-      font-size: 0.78rem;
-      white-space: nowrap;
-    }
-
-    .note {
-      color: var(--muted);
-      font-size: 0.875rem;
-      margin-top: 0.75rem;
-    }
-
-    /* ── Footer ── */
+    /* ─────────────────── FOOTER ─────────────────── */
     footer {
-      padding: 2rem 0 3.5rem;
       border-top: 1px solid var(--border);
+      padding: 3rem 0 4.5rem;
+    }
+    .foot-row {
       display: flex;
-      gap: 1.25rem;
       align-items: center;
+      justify-content: space-between;
       flex-wrap: wrap;
-      font-size: 0.875rem;
-      color: var(--muted);
+      gap: 1.25rem;
     }
-
-    footer a { color: var(--muted); }
-    footer a:hover { color: var(--accent); }
-
-    .spacer { flex: 1; }
-
-    /* ── Responsive ── */
-    @media (max-width: 500px) {
-      h1 { font-size: 2rem; }
-      pre { font-size: 0.8rem; }
+    .foot-links {
+      display: flex;
+      gap: 1.5rem;
+      font-size: 0.85rem;
     }
+    .foot-links a { color: var(--muted); }
+    .foot-links a:hover { color: var(--cyan); text-decoration: none; }
+    .foot-copy { font-size: 0.78rem; color: var(--muted); }
+    .foot-copy a { color: var(--muted); }
+    .foot-copy a:hover { color: var(--cyan); text-decoration: none; }
   </style>
 </head>
 <body>
-<div class="wrap">
 
-  <header>
-    <img src="favicon.svg" alt="spillway logo" width="88" height="88">
-    <h1>spillway</h1>
-    <p class="tagline">replicate Kubernetes Secrets and ConfigMaps across namespaces — via annotations or declarative profiles</p>
-  </header>
+<!-- ═══════════════════════════════ HERO ═══════════════════════════════ -->
+<div class="hero">
 
-  <section>
-    <h2>Install</h2>
-    <pre><code>helm install spillway oci://ghcr.io/kroy-the-rabbit/charts/spillway \
-  --version 0.4.2 \
-  --namespace spillway-system \
-  --create-namespace</code></pre>
-    <p>Requires Kubernetes 1.25+ and Helm 3.10+. The chart is published to GHCR as an OCI artifact — no <code>helm repo add</code> needed. The <code>SpillwayProfile</code> CRD is installed automatically.</p>
-  </section>
+  <!--  Namespace graph  -->
+  <svg class="ns-graph" viewBox="0 0 540 270" fill="none"
+       xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <defs>
+      <!-- paths referenced by animateMotion -->
+      <path id="pl" d="M270,88 C270,148 96,162 96,206"/>
+      <path id="pc" d="M270,88 L270,206"/>
+      <path id="pr" d="M270,88 C270,148 444,162 444,206"/>
+    </defs>
 
-  <section>
-    <h2>The idea</h2>
-    <p>You have a <code>Secret</code> in <code>platform</code> and every one of your tenant namespaces needs a copy. Copy-pasting YAML doesn't scale, and writing a script to keep them in sync is exactly as fun as it sounds.</p>
-    <p>Spillway watches your cluster and handles creation, updates, and cleanup automatically. Annotate a single source object, or use a <code>SpillwayProfile</code> to manage entire sets of objects declaratively — no annotations on the sources required.</p>
-  </section>
+    <!-- static background lines -->
+    <path class="flow-bg dl" d="M270,88 C270,148 96,162 96,206"/>
+    <path class="flow-bg dc" d="M270,88 L270,206"/>
+    <path class="flow-bg dr" d="M270,88 C270,148 444,162 444,206"/>
 
-  <section>
-    <h2>Features</h2>
-    <div class="features">
-      <div class="feature">
-        <div class="feature-title">Annotation-driven replication</div>
-        <p>Add one annotation to any Secret or ConfigMap. Replicate to explicit namespaces, glob patterns, or by label selector. Mix and match freely.</p>
+    <!-- travelling particles — left -->
+    <circle r="4.5" fill="#00c8f0" opacity="0">
+      <animateMotion dur="2.2s" repeatCount="indefinite" begin="0.8s">
+        <mpath href="#pl"/>
+      </animateMotion>
+      <animate attributeName="opacity"
+               values="0;0.9;0.9;0" keyTimes="0;0.1;0.85;1"
+               dur="2.2s" repeatCount="indefinite" begin="0.8s"/>
+    </circle>
+    <!-- centre -->
+    <circle r="4.5" fill="#00c8f0" opacity="0">
+      <animateMotion dur="1.6s" repeatCount="indefinite" begin="1.1s">
+        <mpath href="#pc"/>
+      </animateMotion>
+      <animate attributeName="opacity"
+               values="0;0.9;0.9;0" keyTimes="0;0.1;0.85;1"
+               dur="1.6s" repeatCount="indefinite" begin="1.1s"/>
+    </circle>
+    <!-- right -->
+    <circle r="4.5" fill="#00c8f0" opacity="0">
+      <animateMotion dur="2.2s" repeatCount="indefinite" begin="1.4s">
+        <mpath href="#pr"/>
+      </animateMotion>
+      <animate attributeName="opacity"
+               values="0;0.9;0.9;0" keyTimes="0;0.1;0.85;1"
+               dur="2.2s" repeatCount="indefinite" begin="1.4s"/>
+    </circle>
+
+    <!-- source glow ring -->
+    <circle class="src-ring" cx="270" cy="55" r="44"/>
+
+    <!-- source node -->
+    <g class="src-glow">
+      <circle cx="270" cy="55" r="34" fill="#0c1a2e" stroke="#00c8f0" stroke-width="1.5"/>
+      <text x="270" y="51" text-anchor="middle" fill="#00c8f0"
+            font-family="ui-monospace,monospace" font-size="8.5" letter-spacing="0.07em">platform</text>
+      <text x="270" y="63" text-anchor="middle" fill="rgba(0,200,240,0.45)"
+            font-family="ui-monospace,monospace" font-size="7">namespace</text>
+      <!-- secret pill -->
+      <rect x="226" y="85" width="88" height="16" rx="3"
+            fill="rgba(240,160,64,0.10)" stroke="rgba(240,160,64,0.28)" stroke-width="0.8"/>
+      <text x="270" y="96" text-anchor="middle" fill="#f0a040"
+            font-family="ui-monospace,monospace" font-size="7">Secret · api-token</text>
+    </g>
+
+    <!-- target nodes -->
+    <g class="tgt-node">
+      <circle cx="96" cy="232" r="28" fill="#0c1a2e" stroke="#192840" stroke-width="1.5"/>
+      <text x="96" y="228" text-anchor="middle" fill="#dce9f7"
+            font-family="ui-monospace,monospace" font-size="8">team-a</text>
+      <text x="96" y="240" text-anchor="middle" fill="rgba(0,232,154,0.65)"
+            font-family="ui-monospace,monospace" font-size="6.5">✓ synced</text>
+    </g>
+    <g class="tgt-node">
+      <circle cx="270" cy="232" r="28" fill="#0c1a2e" stroke="#192840" stroke-width="1.5"/>
+      <text x="270" y="228" text-anchor="middle" fill="#dce9f7"
+            font-family="ui-monospace,monospace" font-size="8">team-b</text>
+      <text x="270" y="240" text-anchor="middle" fill="rgba(0,232,154,0.65)"
+            font-family="ui-monospace,monospace" font-size="6.5">✓ synced</text>
+    </g>
+    <g class="tgt-node">
+      <circle cx="444" cy="232" r="28" fill="#0c1a2e" stroke="#192840" stroke-width="1.5"/>
+      <text x="444" y="228" text-anchor="middle" fill="#dce9f7"
+            font-family="ui-monospace,monospace" font-size="8">team-c</text>
+      <text x="444" y="240" text-anchor="middle" fill="rgba(0,232,154,0.65)"
+            font-family="ui-monospace,monospace" font-size="6.5">✓ synced</text>
+    </g>
+  </svg>
+
+  <h1 class="wordmark">spill<span class="w">way</span></h1>
+  <p class="hero-sub">Replicate Kubernetes Secrets and ConfigMaps across namespaces — via annotations or declarative profiles.</p>
+
+  <div class="install">
+    <span class="ps">$</span>
+    <span>helm install spillway oci://ghcr.io/kroy-the-rabbit/charts/spillway --version 0.4.2 --namespace spillway-system --create-namespace</span>
+  </div>
+
+  <div class="scroll-nudge" aria-hidden="true">
+    scroll
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+         stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 5v14M5 12l7 7 7-7"/>
+    </svg>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════ CONCEPT ═══════════════════════════════ -->
+<div class="section">
+  <div class="container">
+    <div class="section-label">// the idea</div>
+    <div class="concept-split">
+      <div class="pull">
+        <em>One annotation.</em><br>
+        Every tenant<br>
+        gets a copy.
       </div>
-      <div class="feature">
-        <div class="feature-title">SpillwayProfile CRD <span class="pill">new in 0.3</span></div>
-        <p>Declaratively replicate a set of Secrets and ConfigMaps without touching the source objects. Ideal for platform bootstrap and GitOps workflows.</p>
-      </div>
-      <div class="feature">
-        <div class="feature-title">Key projection <span class="pill">new in 0.3</span></div>
-        <p>Whitelist or blacklist specific data keys per replica. Give tenants only the keys they need — keep the rest private.</p>
-      </div>
-      <div class="feature">
-        <div class="feature-title">Replica TTL <span class="pill">new in 0.3</span></div>
-        <p>Set a lifetime on replicas with a Go duration (e.g. <code>24h</code>). Expired replicas are <strong>permanently deleted</strong> — not recreated. Perfect for temporary access grants and maintenance windows.</p>
-      </div>
-      <div class="feature">
-        <div class="feature-title">Namespace consent <span class="pill">new in 0.3</span></div>
-        <p>Annotate a target namespace to restrict which sources it accepts. Opt in to specific namespaces, specific objects, or leave it open.</p>
+      <div class="body-text">
+        <p>You have a <code>Secret</code> in <code>platform</code> and every one of your tenant namespaces needs a copy. Copy-pasting YAML doesn't scale, and a sync script is exactly as fun as it sounds.</p>
+        <p>Spillway is a Kubernetes controller that watches your cluster and handles creation, updates, and cleanup automatically. Annotate a single source object, or use a <code>SpillwayProfile</code> to manage entire sets declaratively — no annotations on the sources required.</p>
+        <p>Requires Kubernetes 1.25+ and Helm 3.10+. The <code>SpillwayProfile</code> CRD is installed by the chart. No admission webhooks, no cluster-wide pre-configuration.</p>
       </div>
     </div>
-  </section>
+  </div>
+</div>
 
-  <section>
-    <h2>Annotation-driven usage</h2>
-    <p>Annotate a source object and spillway does the rest:</p>
-    <pre><code>apiVersion: v1
+<!-- ═══════════════════════════════ FEATURES ═══════════════════════════════ -->
+<div class="section">
+  <div class="container">
+    <div class="section-label">// capabilities</div>
+
+    <div class="feat-row">
+      <span class="feat-n">01</span>
+      <div class="feat-body">
+        <h3>Annotation-driven replication</h3>
+        <p>Add one annotation to any Secret or ConfigMap. Target by explicit name, glob pattern (<code>team-*</code>), the value <code>all</code>, or a Kubernetes label selector. Combine freely. Exclusions always win over includes.</p>
+      </div>
+    </div>
+
+    <div class="feat-row">
+      <span class="feat-n">02</span>
+      <div class="feat-body">
+        <h3>SpillwayProfile CRD <span class="badge">v0.3+</span></h3>
+        <p>Define replication policy as a first-class resource, independent of the source objects. Platform teams control what gets replicated and where without touching any existing Secrets or ConfigMaps. Ideal for GitOps workflows.</p>
+      </div>
+    </div>
+
+    <div class="feat-row">
+      <span class="feat-n">03</span>
+      <div class="feat-body">
+        <h3>Key projection <span class="badge">v0.3+</span></h3>
+        <p>Whitelist or blacklist specific data keys per replica. Use <code>include-keys</code> to give a tenant only the keys they need, or <code>exclude-keys</code> to strip internal fields. Works on both annotation-driven and profile replicas.</p>
+      </div>
+    </div>
+
+    <div class="feat-row">
+      <span class="feat-n">04</span>
+      <div class="feat-body">
+        <h3>Replica TTL <span class="badge">v0.3+</span></h3>
+        <p>Set a lifetime with a Go duration (e.g. <code>24h</code>). Expired replicas are <strong>permanently deleted</strong> — not recreated. The expired namespace is recorded on the source. Remove that entry to re-enable replication. Perfect for time-limited maintenance grants.</p>
+      </div>
+    </div>
+
+    <div class="feat-row">
+      <span class="feat-n">05</span>
+      <div class="feat-body">
+        <h3>Namespace consent <span class="badge">v0.3+</span></h3>
+        <p>Annotate a target namespace to declare what sources it accepts, using <code>Kind/namespace/name</code> format with <code>*</code> wildcards. Absent annotation means accept all — existing clusters are unaffected by default.</p>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ═══════════════════════════ ANNOTATION USAGE ═══════════════════════════ -->
+<div class="code-section">
+  <div class="container">
+    <div class="section-label">// annotation-driven usage</div>
+
+    <div class="code-split">
+      <div class="code-prose">
+        <h3>Annotate a Secret or ConfigMap</h3>
+        <p>One annotation — Spillway reconciles continuously. Changes to the source propagate to every replica. Deletions clean up all replicas automatically.</p>
+        <p>Glob patterns match namespace names at reconcile time. Label selectors resolve live against the cluster — new namespaces that gain a matching label are picked up on the next sync.</p>
+      </div>
+      <div class="term">
+        <div class="term-bar">
+          <span class="dot d-r"></span>
+          <span class="dot d-y"></span>
+          <span class="dot d-g"></span>
+          <span class="term-file">secret.yaml</span>
+        </div>
+        <pre>apiVersion: v1
 kind: Secret
 metadata:
   name: shared-api-token
   namespace: platform
   annotations:
-    spillway.kroy.io/replicate-to: "team-*,prod"
-    spillway.kroy.io/include-keys: "token"   # only copy this key
+    <span class="k">spillway.kroy.io/replicate-to</span>: <span class="a">"team-*,prod"</span>
+    <span class="k">spillway.kroy.io/include-keys</span>: <span class="a">"token"</span>
 type: Opaque
 stringData:
   token: hunter2
-  internal-notes: do not distribute</code></pre>
-    <p>ConfigMaps work exactly the same way. You can target by namespace label instead of name:</p>
-    <pre><code>  annotations:
-    spillway.kroy.io/replicate-to-matching: "env=prod"
-    spillway.kroy.io/exclude-namespaces: "team-dev"
-    spillway.kroy.io/replica-ttl: "24h"    # permanently expire after 24 hours</code></pre>
-  </section>
+  internal-notes: do not distribute</pre>
+      </div>
+    </div>
 
-  <section>
-    <h2>SpillwayProfile</h2>
-    <p>Define replication policy independently of the source objects. No annotations required on the source:</p>
-    <pre><code>apiVersion: spillway.kroy.io/v1alpha1
+    <div class="code-split">
+      <div class="code-prose">
+        <h3>Label selectors and TTL</h3>
+        <p>Target dynamically by namespace label. Combine with a TTL to create time-limited replicas that expire and self-destruct — no manual cleanup required.</p>
+      </div>
+      <div class="term">
+        <div class="term-bar">
+          <span class="dot d-r"></span>
+          <span class="dot d-y"></span>
+          <span class="dot d-g"></span>
+          <span class="term-file">maintenance-grant.yaml</span>
+        </div>
+        <pre>  annotations:
+    <span class="k">spillway.kroy.io/replicate-to-matching</span>: <span class="a">"env=prod"</span>
+    <span class="k">spillway.kroy.io/exclude-namespaces</span>: <span class="a">"team-dev"</span>
+    <span class="k">spillway.kroy.io/replica-ttl</span>: <span class="a">"24h"</span></pre>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ═══════════════════════════ SPILLWAYPROFILE ═══════════════════════════ -->
+<div class="code-section">
+  <div class="container">
+    <div class="section-label">// declarative profiles</div>
+
+    <div class="code-split">
+      <div class="code-prose">
+        <h3>Policy without touching the source</h3>
+        <p>A <code>SpillwayProfile</code> separates replication policy from the objects being replicated. Platform teams own the profile; application teams own their Secrets and ConfigMaps. Neither needs to know about the other.</p>
+        <p>Profiles support key projection, namespace exclusions, label selectors, and the <code>accept-from</code> consent check — everything the annotation path supports, unified in one resource.</p>
+        <p>Deleting the profile removes all replicas it owns. It will never touch annotation-managed replicas.</p>
+      </div>
+      <div class="term">
+        <div class="term-bar">
+          <span class="dot d-r"></span>
+          <span class="dot d-y"></span>
+          <span class="dot d-g"></span>
+          <span class="term-file">platform-profile.yaml</span>
+        </div>
+        <pre>apiVersion: spillway.kroy.io/v1alpha1
 kind: SpillwayProfile
 metadata:
   name: platform-secrets
   namespace: platform
 spec:
   targetNamespaces:
-    - "team-*"
+    - <span class="a">"team-*"</span>
   targetSelector:
     matchLabels:
-      env: prod
+      <span class="k">env</span>: <span class="v">prod</span>
   excludeNamespaces:
     - team-dev
   sources:
     - kind: Secret
       name: shared-api-token
-      includeKeys: ["token"]
+      includeKeys: [<span class="a">"token"</span>]
     - kind: ConfigMap
       name: app-config
-      excludeKeys: ["internal-notes"]</code></pre>
-    <p>The profile reconciler creates and updates replicas as sources change, removes replicas from namespaces that no longer match, enforces <code>accept-from</code> per source, refuses to overwrite unmanaged or annotation-managed targets, and cleans up everything when the profile is deleted.</p>
-  </section>
+      excludeKeys: [<span class="a">"internal-notes"</span>]</pre>
+      </div>
+    </div>
 
-  <section>
-    <h2>Namespace consent</h2>
-    <p>Annotate a target namespace to control which sources it will accept. Format: <code>Kind/namespace/name</code> with wildcard (<code>*</code>) support in each segment.</p>
-    <pre><code>apiVersion: v1
+  </div>
+</div>
+
+<!-- ═══════════════════════════ NAMESPACE CONSENT ═══════════════════════════ -->
+<div class="code-section">
+  <div class="container">
+    <div class="section-label">// namespace consent</div>
+
+    <div class="code-split">
+      <div class="code-prose">
+        <h3>Tenant-side allowlisting</h3>
+        <p>A namespace can declare exactly which sources it accepts. Format is <code>Kind/namespace/name</code> with <code>*</code> wildcards in any segment. Spillway checks this before creating or updating any replica.</p>
+        <p>Absent annotation means accept from all sources — existing clusters are unaffected by default. Add it to any namespace that should be more selective.</p>
+      </div>
+      <div class="term">
+        <div class="term-bar">
+          <span class="dot d-r"></span>
+          <span class="dot d-y"></span>
+          <span class="dot d-g"></span>
+          <span class="term-file">payments-ns.yaml</span>
+        </div>
+        <pre>apiVersion: v1
 kind: Namespace
 metadata:
   name: payments
   annotations:
-    # Accept any Secret from the platform namespace, plus one specific ConfigMap
-    spillway.kroy.io/accept-from: "Secret/platform/*,ConfigMap/ops/app-config"
+    <span class="c"># any Secret from platform, one specific ConfigMap</span>
+    <span class="k">spillway.kroy.io/accept-from</span>: <span class="a">"Secret/platform/*,\
+      ConfigMap/ops/app-config"</span>
 
-    # Or accept everything from the platform namespace (any kind)
-    # spillway.kroy.io/accept-from: "*/platform/*"</code></pre>
-    <p>Absent annotation means accept from all sources — existing clusters are unaffected by default.</p>
-  </section>
+    <span class="c"># or: accept everything from platform</span>
+    <span class="c"># spillway.kroy.io/accept-from: "*/platform/*"</span></pre>
+      </div>
+    </div>
 
-  <section>
-    <h2>Annotation reference</h2>
-    <div class="table-wrap">
+  </div>
+</div>
+
+<!-- ═══════════════════════════ REFERENCE TABLE ═══════════════════════════ -->
+<div class="section">
+  <div class="container">
+    <div class="section-label">// annotation reference</div>
+    <div class="tbl-wrap">
       <table>
         <thead>
           <tr>
-            <th>Annotation</th>
-            <th>Description</th>
+            <th>annotation &nbsp;<span style="opacity:.45;font-weight:400">(prefix: spillway.kroy.io/)</span></th>
+            <th>description</th>
           </tr>
         </thead>
         <tbody>
           <tr>
             <td><code>replicate-to</code></td>
-            <td>Comma-separated targets. Accepts <code>all</code>, globs like <code>team-*</code>, or explicit names. Mix freely.</td>
+            <td class="muted-td">Comma-separated targets. Accepts <code>all</code>, globs like <code>team-*</code>, or explicit names. Mix freely.</td>
           </tr>
           <tr>
             <td><code>replicate-to-matching</code></td>
-            <td>Label selector targeting. E.g. <code>env=prod</code>. Resolved at reconcile time.</td>
+            <td class="muted-td">Label selector targeting, e.g. <code>env=prod</code>. Resolved live at reconcile time.</td>
           </tr>
           <tr>
             <td><code>exclude-namespaces</code></td>
-            <td>Comma-separated exclusions, same syntax as <code>replicate-to</code>. Always wins over includes.</td>
+            <td class="muted-td">Comma-separated exclusions, same syntax as <code>replicate-to</code>. Always wins over includes.</td>
           </tr>
           <tr>
             <td><code>include-keys</code></td>
-            <td>Comma-separated data key whitelist. Only listed keys are copied. Mutually exclusive with <code>exclude-keys</code>.</td>
+            <td class="muted-td">Data key whitelist. Only listed keys are copied. Mutually exclusive with <code>exclude-keys</code>.</td>
           </tr>
           <tr>
             <td><code>exclude-keys</code></td>
-            <td>Comma-separated data key blacklist. Listed keys are omitted from replicas.</td>
+            <td class="muted-td">Data key blacklist. Listed keys are stripped from all replicas.</td>
           </tr>
           <tr>
             <td><code>replica-ttl</code></td>
-            <td>Go duration (e.g. <code>24h</code>, <code>168h</code>). Replicas are <strong>permanently deleted</strong> once the TTL elapses — not recreated. The expired namespace is recorded in <code>expired-namespaces</code> on the source. Remove that annotation entry to re-enable.</td>
+            <td class="muted-td">Go duration (e.g. <code>24h</code>). Replicas are <strong>permanently deleted</strong> when the TTL elapses. The expired namespace is recorded in <code>expired-namespaces</code> on the source — remove that entry to re-enable.</td>
           </tr>
           <tr>
             <td><code>force-adopt</code></td>
-            <td>Set to <code>"true"</code> to take ownership of a pre-existing unmanaged object instead of skipping it. This applies to annotation-driven replication only.</td>
+            <td class="muted-td">Set to <code>"true"</code> to claim ownership of a pre-existing unmanaged object. Annotation-driven replication only.</td>
           </tr>
           <tr>
-            <td><code>accept-from</code> <em>(on Namespace)</em></td>
-            <td>Comma-separated allowlist in <code>Kind/namespace/name</code> format with <code>*</code> wildcards. E.g. <code>Secret/platform/*</code>, <code>*/platform/*</code>, <code>all</code>.</td>
+            <td><code>accept-from</code>&thinsp;<em style="font-size:0.78em">(on Namespace)</em></td>
+            <td class="muted-td">Comma-separated allowlist in <code>Kind/namespace/name</code> format. Wildcards accepted in each segment. E.g. <code>Secret/platform/*</code>, <code>*/platform/*</code>, <code>all</code>.</td>
           </tr>
         </tbody>
       </table>
     </div>
-    <p class="note">All annotation keys are prefixed <code>spillway.kroy.io/</code>. <code>kube-system</code> is excluded by default when using <code>all</code> or wildcards — explicitly naming it overrides that.</p>
-  </section>
+    <p class="note"><code>kube-system</code> is excluded by default when using <code>all</code> or wildcards — explicitly naming it overrides the protection. The <code>SpillwayProfile</code> CRD is installed automatically (<code>installCRDs: true</code>). Set it to <code>false</code> if you manage CRDs separately via GitOps.</p>
+  </div>
+</div>
 
-  <section>
-    <h2>Upgrade</h2>
-    <pre><code>helm upgrade spillway oci://ghcr.io/kroy-the-rabbit/charts/spillway \
+<!-- ═══════════════════════════ UPGRADE ═══════════════════════════ -->
+<div class="section">
+  <div class="container">
+    <div class="section-label">// upgrade</div>
+    <div class="term" style="max-width:580px">
+      <div class="term-bar">
+        <span class="dot d-r"></span>
+        <span class="dot d-y"></span>
+        <span class="dot d-g"></span>
+      </div>
+      <pre>helm upgrade spillway oci://ghcr.io/kroy-the-rabbit/charts/spillway \
   --version 0.4.2 \
   --namespace spillway-system \
-  --reuse-values</code></pre>
-  </section>
-
-  <footer>
-    <a href="https://github.com/kroy-the-rabbit/spillway">GitHub</a>
-    <a href="https://artifacthub.io/packages/search?repo=spillway">Artifact Hub</a>
-    <a href="https://github.com/kroy-the-rabbit/spillway/blob/main/SECURITY.md">Security</a>
-    <span class="spacer"></span>
-    <span>Apache-2.0 &middot; a side project by <a href="https://kroy.io">kroy</a></span>
-  </footer>
-
+  --reuse-values</pre>
+    </div>
+  </div>
 </div>
+
+<!-- ═══════════════════════════ FOOTER ═══════════════════════════ -->
+<footer>
+  <div class="container">
+    <div class="foot-row">
+      <div class="foot-links">
+        <a href="https://github.com/kroy-the-rabbit/spillway">GitHub</a>
+        <a href="https://artifacthub.io/packages/search?repo=spillway">Artifact Hub</a>
+        <a href="https://github.com/kroy-the-rabbit/spillway/blob/main/SECURITY.md">Security</a>
+      </div>
+      <span class="foot-copy">Apache-2.0 &middot; a side project by <a href="https://kroy.io">kroy</a></span>
+    </div>
+  </div>
+</footer>
+
 </body>
 </html>
