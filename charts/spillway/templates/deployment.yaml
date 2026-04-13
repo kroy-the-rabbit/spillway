@@ -38,14 +38,14 @@ spec:
           image: {{ include "spillway.image" . }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args:
-            - --leader-elect={{ .Values.controller.leaderElect }}
+            - --leader-elect={{ ternary "true" "false" .Values.controller.leaderElect }}
             - --metrics-bind-address={{ .Values.controller.metricsBindAddress }}
             - --health-probe-bind-address={{ .Values.controller.healthProbeBindAddress }}
             - --sync-period={{ .Values.controller.syncPeriod }}
             - --self-heal-interval={{ default "45s" .Values.controller.selfHealInterval }}
             - --orphan-audit-interval={{ default "0s" .Values.controller.orphanAuditInterval }}
-            - --require-namespace-consent={{ .Values.controller.requireNamespaceConsent }}
-            - --allow-force-adopt={{ .Values.controller.allowForceAdopt }}
+            - --require-namespace-consent={{ ternary "true" "false" .Values.controller.requireNamespaceConsent }}
+            - --allow-force-adopt={{ ternary "true" "false" .Values.controller.allowForceAdopt }}
             {{- if .Values.controller.protectedNamespaces }}
             - --protected-namespaces={{ .Values.controller.protectedNamespaces }}
             {{- end }}

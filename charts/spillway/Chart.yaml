@@ -4,8 +4,8 @@ description: >
   Replicates Kubernetes Secrets and ConfigMaps across namespaces in near real
   time using source annotations or SpillwayProfile resources.
 type: application
-version: 0.4.3
-appVersion: "0.4.3"
+version: 0.4.4
+appVersion: "0.4.4"
 keywords:
   - kubernetes
   - secrets
@@ -30,9 +30,9 @@ annotations:
       url: https://github.com/kroy-the-rabbit/spillway
   artifacthub.io/changes: |
     - kind: fixed
-      description: "Grant SpillwayProfile reconcile RBAC needed for finalizer and status updates across namespaces"
+      description: "Render controller boolean CLI flags as explicit true/false values in the Helm chart"
     - kind: fixed
-      description: "Coerce partial kubernetes.io/tls projections to Opaque replicas when required TLS keys are omitted"
+      description: "Push Artifact Hub OCI metadata to the chart package path accepted by GHCR"
   artifacthub.io/maintainers: |
     - name: kroy
       email: kroy@kroy.io

@@ -139,7 +139,7 @@ Profile replicas carry `spillway.kroy.io/profile-ref` and are independent of ann
 ```bash
 # Pick a released chart version from:
 # https://github.com/kroy-the-rabbit/spillway/releases
-VERSION=0.4.3
+VERSION=0.4.4
 
 helm registry login ghcr.io
 helm install spillway oci://ghcr.io/kroy-the-rabbit/charts/spillway \
@@ -162,7 +162,7 @@ helm upgrade spillway oci://ghcr.io/kroy-the-rabbit/charts/spillway \
 ### Install from local chart path
 
 ```bash
-VERSION=0.4.3
+VERSION=0.4.4
 
 helm install spillway ./charts/spillway \
   --namespace spillway-system \
@@ -201,7 +201,7 @@ topologySpreadConstraints:
 
 ```bash
 helm upgrade --install spillway oci://ghcr.io/kroy-the-rabbit/charts/spillway \
-  --version 0.4.3 \
+  --version 0.4.4 \
   --namespace spillway-system \
   --create-namespace \
   -f values-prod.yaml
@@ -213,7 +213,7 @@ Enable `ServiceMonitor` (Prometheus Operator required):
 
 ```bash
 helm upgrade spillway oci://ghcr.io/kroy-the-rabbit/charts/spillway \
-  --version 0.4.3 \
+  --version 0.4.4 \
   --namespace spillway-system \
   --set metrics.serviceMonitor.enabled=true \
   --set metrics.serviceMonitor.labels.release=prometheus
@@ -223,7 +223,7 @@ helm upgrade spillway oci://ghcr.io/kroy-the-rabbit/charts/spillway \
 
 ```bash
 helm upgrade spillway oci://ghcr.io/kroy-the-rabbit/charts/spillway \
-  --version 0.4.3 \
+  --version 0.4.4 \
   --namespace spillway-system \
   --set networkPolicy.enabled=true
 ```
@@ -233,7 +233,7 @@ helm upgrade spillway oci://ghcr.io/kroy-the-rabbit/charts/spillway \
 | Key | Default | Description |
 |-----|---------|-------------|
 | `image.repository` | `ghcr.io/kroy-the-rabbit/spillway` | Controller image repository |
-| `image.tag` | chart `appVersion` | Image tag (`0.4.3` when appVersion is `0.4.3`) |
+| `image.tag` | chart `appVersion` | Image tag (`0.4.4` when appVersion is `0.4.4`) |
 | `replicaCount` | `2` | Number of controller replicas |
 | `installCRDs` | `true` | Install the SpillwayProfile CRD |
 | `controller.leaderElect` | `true` | Enable leader election |
@@ -250,7 +250,7 @@ See `charts/spillway/values.yaml` for full defaults.
 
 ## Deploy (Kustomize, simple/dev)
 
-`config/default` uses image tag `0.4.3` by default. Apply with:
+`config/default` uses image tag `0.4.4` by default. Apply with:
 
 ```bash
 kubectl apply -k config/default
@@ -260,7 +260,7 @@ kubectl apply -k config/default
 
 ```bash
 # Single-arch
-VERSION=0.4.3
+VERSION=0.4.4
 docker build --build-arg VERSION="${VERSION}" -t "ghcr.io/kroy-the-rabbit/spillway:${VERSION}" .
 
 # Multi-arch (requires docker buildx)
