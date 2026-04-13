@@ -52,6 +52,12 @@ The website is published from the `docs/` directory by `.github/workflows/deploy
 - `spillway.kroy.io/exclude-keys: "key1,key2"`
   - Blacklist: the listed data keys are omitted from replicas
 
+For typed Secrets, Spillway preserves the source `type` only when the projected
+payload still satisfies Kubernetes validation. For example, projecting only
+`tls.crt` from a `kubernetes.io/tls` Secret produces an `Opaque` replica; the
+replica stays `kubernetes.io/tls` only when both `tls.crt` and `tls.key` are
+present after projection.
+
 ### Replica TTL
 
 - `spillway.kroy.io/replica-ttl: "24h"`
@@ -133,7 +139,7 @@ Profile replicas carry `spillway.kroy.io/profile-ref` and are independent of ann
 ```bash
 # Pick a released chart version from:
 # https://github.com/kroy-the-rabbit/spillway/releases
-VERSION=0.4.2
+VERSION=0.4.3
 
 helm registry login ghcr.io
 helm install spillway oci://ghcr.io/kroy-the-rabbit/charts/spillway \
@@ -156,7 +162,7 @@ helm upgrade spillway oci://ghcr.io/kroy-the-rabbit/charts/spillway \
 ### Install from local chart path
 
 ```bash
-VERSION=0.4.2
+VERSION=0.4.3
 
 helm install spillway ./charts/spillway \
   --namespace spillway-system \
@@ -195,7 +201,7 @@ topologySpreadConstraints:
 
 ```bash
 helm upgrade --install spillway oci://ghcr.io/kroy-the-rabbit/charts/spillway \
-  --version 0.4.2 \
+  --version 0.4.3 \
   --namespace spillway-system \
   --create-namespace \
   -f values-prod.yaml
@@ -207,7 +213,7 @@ Enable `ServiceMonitor` (Prometheus Operator required):
 
 ```bash
 helm upgrade spillway oci://ghcr.io/kroy-the-rabbit/charts/spillway \
-  --version 0.4.2 \
+  --version 0.4.3 \
   --namespace spillway-system \
   --set metrics.serviceMonitor.enabled=true \
   --set metrics.serviceMonitor.labels.release=prometheus
@@ -217,7 +223,7 @@ helm upgrade spillway oci://ghcr.io/kroy-the-rabbit/charts/spillway \
 
 ```bash
 helm upgrade spillway oci://ghcr.io/kroy-the-rabbit/charts/spillway \
-  --version 0.4.2 \
+  --version 0.4.3 \
   --namespace spillway-system \
   --set networkPolicy.enabled=true
 ```
@@ -227,7 +233,7 @@ helm upgrade spillway oci://ghcr.io/kroy-the-rabbit/charts/spillway \
 | Key | Default | Description |
 |-----|---------|-------------|
 | `image.repository` | `ghcr.io/kroy-the-rabbit/spillway` | Controller image repository |
-| `image.tag` | chart `appVersion` | Image tag (`0.4.2` when appVersion is `0.4.2`) |
+| `image.tag` | chart `appVersion` | Image tag (`0.4.3` when appVersion is `0.4.3`) |
 | `replicaCount` | `2` | Number of controller replicas |
 | `installCRDs` | `true` | Install the SpillwayProfile CRD |
 | `controller.leaderElect` | `true` | Enable leader election |
@@ -244,7 +250,7 @@ See `charts/spillway/values.yaml` for full defaults.
 
 ## Deploy (Kustomize, simple/dev)
 
-`config/default` uses image tag `0.4.2` by default. Apply with:
+`config/default` uses image tag `0.4.3` by default. Apply with:
 
 ```bash
 kubectl apply -k config/default
@@ -254,7 +260,7 @@ kubectl apply -k config/default
 
 ```bash
 # Single-arch
-VERSION=0.4.2
+VERSION=0.4.3
 docker build --build-arg VERSION="${VERSION}" -t "ghcr.io/kroy-the-rabbit/spillway:${VERSION}" .
 
 # Multi-arch (requires docker buildx)

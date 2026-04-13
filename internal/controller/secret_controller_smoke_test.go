@@ -271,6 +271,84 @@ func TestSecretReconcileSmoke_DeletedReplicaIsRecreated(t *testing.T) {
 	}
 }
 
+func TestSecretReconcileSmoke_TLSProjectionDowngradesReplicaTypeWhenKeyMissing(t *testing.T) {
+	ctx := context.Background()
+	c, scheme := newSecretSmokeClient(t,
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "platform"}},
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "team-a"}},
+		&corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "shared-cert",
+				Namespace: "platform",
+				Annotations: map[string]string{
+					AnnotationReplicateTo: "team-a",
+					AnnotationIncludeKeys: "tls.crt",
+				},
+			},
+			Type: corev1.SecretTypeTLS,
+			Data: map[string][]byte{
+				corev1.TLSCertKey:       []byte("cert"),
+				corev1.TLSPrivateKeyKey: []byte("key"),
+			},
+		},
+	)
+
+	r := &SecretReconciler{Client: c, Scheme: scheme, Log: log.Log.WithName("test"), Recorder: record.NewFakeRecorder(100)}
+	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "platform", Name: "shared-cert"}}); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+
+	var replica corev1.Secret
+	if err := c.Get(ctx, client.ObjectKey{Namespace: "team-a", Name: "shared-cert"}, &replica); err != nil {
+		t.Fatalf("get replicated secret: %v", err)
+	}
+	if replica.Type != corev1.SecretTypeOpaque {
+		t.Fatalf("expected Opaque replica type for partial TLS projection, got %q", replica.Type)
+	}
+	if _, ok := replica.Data[corev1.TLSCertKey]; !ok {
+		t.Fatal("expected projected tls.crt key to be present")
+	}
+	if _, ok := replica.Data[corev1.TLSPrivateKeyKey]; ok {
+		t.Fatal("expected tls.key to be omitted by include-keys")
+	}
+}
+
+func TestSecretReconcileSmoke_TLSProjectionPreservesTLSTypeWhenKeysRemainComplete(t *testing.T) {
+	ctx := context.Background()
+	c, scheme := newSecretSmokeClient(t,
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "platform"}},
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "team-a"}},
+		&corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "shared-cert",
+				Namespace: "platform",
+				Annotations: map[string]string{
+					AnnotationReplicateTo: "team-a",
+					AnnotationIncludeKeys: "tls.crt,tls.key",
+				},
+			},
+			Type: corev1.SecretTypeTLS,
+			Data: map[string][]byte{
+				corev1.TLSCertKey:       []byte("cert"),
+				corev1.TLSPrivateKeyKey: []byte("key"),
+			},
+		},
+	)
+
+	r := &SecretReconciler{Client: c, Scheme: scheme, Log: log.Log.WithName("test"), Recorder: record.NewFakeRecorder(100)}
+	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "platform", Name: "shared-cert"}}); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+
+	var replica corev1.Secret
+	if err := c.Get(ctx, client.ObjectKey{Namespace: "team-a", Name: "shared-cert"}, &replica); err != nil {
+		t.Fatalf("get replicated secret: %v", err)
+	}
+	if replica.Type != corev1.SecretTypeTLS {
+		t.Fatalf("expected TLS replica type when both TLS keys are projected, got %q", replica.Type)
+	}
+}
+
 // TestSecretReconcileSmoke_TTLExpiry verifies that when an existing replica's
 // expires-at annotation is in the past, the controller marks the namespace as
 // permanently expired and removes the replica — not recreating it.

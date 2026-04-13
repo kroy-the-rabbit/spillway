@@ -260,9 +260,8 @@ func (r *ProfileReconciler) syncProfileSecret(
 				AnnotationManagedBy:  ManagedByValue,
 				AnnotationProfileRef: profileRef,
 			}
-			target.Type = src.Type
+			target.Type, target.Data = projectSecretData(src.Type, src.Data, kf)
 			target.Immutable = ptrBool(src.Immutable)
-			target.Data = kf.applyBytes(src.Data)
 			return nil
 		})
 		if syncErr != nil {

@@ -43,9 +43,8 @@ func secretReconcileConfig() reconcileConfig[*corev1.Secret] {
 		kind:                  "Secret",
 		replicaSourceFieldIdx: secretReplicaSourceFieldIdx,
 		applyData: func(src, target *corev1.Secret, kf keyFilter) {
-			target.Type = src.Type
+			target.Type, target.Data = projectSecretData(src.Type, src.Data, kf)
 			target.Immutable = ptrBool(src.Immutable)
-			target.Data = kf.applyBytes(src.Data)
 		},
 		newObject: func() *corev1.Secret { return &corev1.Secret{} },
 		listReplicas: func(ctx context.Context, c client.Client, fieldIdx, sourceFrom string) ([]*corev1.Secret, error) {

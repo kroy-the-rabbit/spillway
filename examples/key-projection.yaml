@@ -3,6 +3,8 @@
 # A single Secret might hold many credentials, but tenants only need
 # a read-only token. Use include-keys to expose only what is needed,
 # or exclude-keys to strip internal/sensitive fields before replication.
+# For typed Secrets such as kubernetes.io/tls, partial projection may cause
+# the replica type to be coerced to Opaque so the projected data remains valid.
 
 # --- Include-keys: whitelist ---
 # Only the "readonly-token" key is copied into replicas.
@@ -19,6 +21,28 @@ stringData:
   readonly-token: read-only-value
   admin-token: super-secret         # NOT replicated
   internal-key: another-secret      # NOT replicated
+
+---
+# --- Partial TLS projection ---
+# Only tls.crt is copied, so the target replica becomes type Opaque.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: public-ca
+  namespace: platform
+  annotations:
+    spillway.kroy.io/replicate-to: "team-*"
+    spillway.kroy.io/include-keys: "tls.crt"
+type: kubernetes.io/tls
+stringData:
+  tls.crt: |
+    -----BEGIN CERTIFICATE-----
+    MIIB
+    -----END CERTIFICATE-----
+  tls.key: |
+    -----BEGIN PRIVATE KEY-----
+    MIIB
+    -----END PRIVATE KEY-----
 
 ---
 # --- Exclude-keys: blacklist ---

@@ -202,6 +202,21 @@ func (f keyFilter) applyBytes(in map[string][]byte) map[string][]byte {
 	return out
 }
 
+// projectSecretData applies a key filter to Secret data and normalises the
+// replica type when projecting only part of a typed Secret payload.
+func projectSecretData(srcType corev1.SecretType, data map[string][]byte, kf keyFilter) (corev1.SecretType, map[string][]byte) {
+	projected := kf.applyBytes(data)
+	if srcType != corev1.SecretTypeTLS {
+		return srcType, projected
+	}
+	if _, hasCert := projected[corev1.TLSCertKey]; hasCert {
+		if _, hasKey := projected[corev1.TLSPrivateKeyKey]; hasKey {
+			return srcType, projected
+		}
+	}
+	return corev1.SecretTypeOpaque, projected
+}
+
 func parseKeyFilter(obj metav1.Object) keyFilter {
 	ann := obj.GetAnnotations()
 	if raw := ann[AnnotationIncludeKeys]; raw != "" {

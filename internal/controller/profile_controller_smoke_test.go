@@ -262,6 +262,87 @@ func TestProfileReconcileSmoke_ConditionsSetOnSuccess(t *testing.T) {
 	}
 }
 
+func TestProfileReconcileSmoke_TLSProjectionDowngradesReplicaTypeWhenKeyMissing(t *testing.T) {
+	srcSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "shared-cert", Namespace: "platform"},
+		Type:       corev1.SecretTypeTLS,
+		Data: map[string][]byte{
+			corev1.TLSCertKey:       []byte("cert"),
+			corev1.TLSPrivateKeyKey: []byte("key"),
+		},
+	}
+	profile := &spillwayv1alpha1.SpillwayProfile{
+		ObjectMeta: metav1.ObjectMeta{Name: "tls-profile", Namespace: "platform"},
+		Spec: spillwayv1alpha1.SpillwayProfileSpec{
+			TargetNamespaces: []string{"team-a"},
+			Sources: []spillwayv1alpha1.ProfileSource{
+				{Kind: "Secret", Name: "shared-cert", IncludeKeys: []string{corev1.TLSCertKey}},
+			},
+		},
+	}
+
+	c := newProfileClient(t,
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "platform"}},
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "team-a"}},
+		srcSecret, profile,
+	)
+	r := newProfileRec(t, c)
+
+	if _, err := r.Reconcile(context.Background(), profileReq("platform", "tls-profile")); err != nil {
+		t.Fatalf("reconcile error: %v", err)
+	}
+
+	var replica corev1.Secret
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "team-a", Name: "shared-cert"}, &replica); err != nil {
+		t.Fatalf("replica not found: %v", err)
+	}
+	if replica.Type != corev1.SecretTypeOpaque {
+		t.Fatalf("expected Opaque replica type for partial TLS projection, got %q", replica.Type)
+	}
+	if _, ok := replica.Data[corev1.TLSPrivateKeyKey]; ok {
+		t.Fatal("expected tls.key to be omitted by includeKeys")
+	}
+}
+
+func TestProfileReconcileSmoke_TLSProjectionPreservesTLSTypeWhenKeysRemainComplete(t *testing.T) {
+	srcSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "shared-cert", Namespace: "platform"},
+		Type:       corev1.SecretTypeTLS,
+		Data: map[string][]byte{
+			corev1.TLSCertKey:       []byte("cert"),
+			corev1.TLSPrivateKeyKey: []byte("key"),
+		},
+	}
+	profile := &spillwayv1alpha1.SpillwayProfile{
+		ObjectMeta: metav1.ObjectMeta{Name: "tls-profile", Namespace: "platform"},
+		Spec: spillwayv1alpha1.SpillwayProfileSpec{
+			TargetNamespaces: []string{"team-a"},
+			Sources: []spillwayv1alpha1.ProfileSource{
+				{Kind: "Secret", Name: "shared-cert", IncludeKeys: []string{corev1.TLSCertKey, corev1.TLSPrivateKeyKey}},
+			},
+		},
+	}
+
+	c := newProfileClient(t,
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "platform"}},
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "team-a"}},
+		srcSecret, profile,
+	)
+	r := newProfileRec(t, c)
+
+	if _, err := r.Reconcile(context.Background(), profileReq("platform", "tls-profile")); err != nil {
+		t.Fatalf("reconcile error: %v", err)
+	}
+
+	var replica corev1.Secret
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "team-a", Name: "shared-cert"}, &replica); err != nil {
+		t.Fatalf("replica not found: %v", err)
+	}
+	if replica.Type != corev1.SecretTypeTLS {
+		t.Fatalf("expected TLS replica type when both TLS keys are projected, got %q", replica.Type)
+	}
+}
+
 func TestProfileReconcileSmoke_ConditionsSetOnMissingSource(t *testing.T) {
 	profile := &spillwayv1alpha1.SpillwayProfile{
 		ObjectMeta: metav1.ObjectMeta{Name: "cond-profile2", Namespace: "platform"},
