@@ -91,6 +91,7 @@ func (r *ProfileReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	if profile.Spec.TargetSelector != nil {
 		sel, err := metav1.LabelSelectorAsSelector(profile.Spec.TargetSelector)
 		if err != nil {
+			recordReplicationOutcome("Profile", modeProfile, "invalid_selector", 1)
 			log.Info("invalid targetSelector", "error", err.Error())
 			r.Recorder.Eventf(&profile, corev1.EventTypeWarning, "InvalidSelector",
 				"Invalid targetSelector: %v", err)
@@ -101,6 +102,10 @@ func (r *ProfileReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 	// Resolve candidate target namespaces first, then enforce accept-from per source.
 	targets, err := resolveTargetNamespacesWithoutConsent(ctx, r.Client, include, exclude, matchingSel, profile.Namespace, r.Opts)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	targetNamespaces, err := r.loadTargetNamespaces(ctx, targets)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -115,7 +120,7 @@ func (r *ProfileReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		kf := keyFilterFromLists(srcSpec.IncludeKeys, srcSpec.ExcludeKeys)
 		switch srcSpec.Kind {
 		case "Secret":
-			n, missing, err := r.syncProfileSecret(ctx, log, &profile, profileRef, srcSpec.Name, kf, targets, desired)
+			n, missing, err := r.syncProfileSecret(ctx, log, &profile, profileRef, srcSpec.Name, kf, targetNamespaces, desired)
 			changedCount += n
 			if missing {
 				missingSources++
@@ -124,7 +129,7 @@ func (r *ProfileReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 				errs = append(errs, err)
 			}
 		case "ConfigMap":
-			n, missing, err := r.syncProfileConfigMap(ctx, log, &profile, profileRef, srcSpec.Name, kf, targets, desired)
+			n, missing, err := r.syncProfileConfigMap(ctx, log, &profile, profileRef, srcSpec.Name, kf, targetNamespaces, desired)
 			changedCount += n
 			if missing {
 				missingSources++
@@ -133,6 +138,7 @@ func (r *ProfileReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 				errs = append(errs, err)
 			}
 		default:
+			recordReplicationOutcome("Profile", modeProfile, "unknown_kind", 1)
 			log.Info("unknown source kind in profile, skipping", "kind", srcSpec.Kind, "name", srcSpec.Name)
 		}
 	}
@@ -213,12 +219,13 @@ func (r *ProfileReconciler) syncProfileSecret(
 	profile *spillwayv1alpha1.SpillwayProfile,
 	profileRef, srcName string,
 	kf keyFilter,
-	targets []string,
+	targetNamespaces map[string]corev1.Namespace,
 	desired map[string]struct{},
 ) (int, bool, error) {
 	var src corev1.Secret
 	if err := r.Get(ctx, client.ObjectKey{Namespace: profile.Namespace, Name: srcName}, &src); err != nil {
 		if apierrors.IsNotFound(err) {
+			recordReplicationOutcome("Secret", modeProfile, "source_missing", 1)
 			log.Info("source secret not found, skipping", "name", srcName)
 			return 0, true, nil
 		}
@@ -226,12 +233,9 @@ func (r *ProfileReconciler) syncProfileSecret(
 	}
 
 	changed := 0
-	for _, ns := range targets {
-		var nsObj corev1.Namespace
-		if err := r.Get(ctx, client.ObjectKey{Name: ns}, &nsObj); err != nil {
-			return changed, false, err
-		}
+	for ns, nsObj := range targetNamespaces {
 		if !checkNamespaceConsentWithKind(&nsObj, "Secret", profile.Namespace, srcName, r.Opts.RequireNamespaceConsent) {
+			recordReplicationOutcome("Secret", modeProfile, "consent_denied", 1)
 			log.Info("skipping profile secret", "namespace", ns, "name", srcName, "reason", "namespace consent denies source")
 			continue
 		}
@@ -247,6 +251,7 @@ func (r *ProfileReconciler) syncProfileSecret(
 			target.Name = srcName
 			target.Namespace = ns
 		} else if err := ensureProfileOwnership(target, "Secret", profileRef); err != nil {
+			recordReplicationOutcome("Secret", modeProfile, "conflict", 1)
 			log.Info("skipping profile secret", "namespace", ns, "name", srcName, "reason", err.Error())
 			continue
 		}
@@ -265,6 +270,7 @@ func (r *ProfileReconciler) syncProfileSecret(
 			return nil
 		})
 		if syncErr != nil {
+			recordReplicationOutcome("Secret", modeProfile, "error", 1)
 			log.Error(syncErr, "failed to sync profile secret", "namespace", ns, "name", srcName)
 			return changed, false, syncErr
 		}
@@ -273,6 +279,7 @@ func (r *ProfileReconciler) syncProfileSecret(
 		if op != controllerutil.OperationResultNone {
 			changed++
 			if action := reconcileActionFromOperationResult(op); action != "" {
+				recordReplicationOutcome("Secret", modeProfile, "success", 1)
 				ReconcileChangesTotal.WithLabelValues("Secret", action).Inc()
 			}
 		}
@@ -286,12 +293,13 @@ func (r *ProfileReconciler) syncProfileConfigMap(
 	profile *spillwayv1alpha1.SpillwayProfile,
 	profileRef, srcName string,
 	kf keyFilter,
-	targets []string,
+	targetNamespaces map[string]corev1.Namespace,
 	desired map[string]struct{},
 ) (int, bool, error) {
 	var src corev1.ConfigMap
 	if err := r.Get(ctx, client.ObjectKey{Namespace: profile.Namespace, Name: srcName}, &src); err != nil {
 		if apierrors.IsNotFound(err) {
+			recordReplicationOutcome("ConfigMap", modeProfile, "source_missing", 1)
 			log.Info("source configmap not found, skipping", "name", srcName)
 			return 0, true, nil
 		}
@@ -299,12 +307,9 @@ func (r *ProfileReconciler) syncProfileConfigMap(
 	}
 
 	changed := 0
-	for _, ns := range targets {
-		var nsObj corev1.Namespace
-		if err := r.Get(ctx, client.ObjectKey{Name: ns}, &nsObj); err != nil {
-			return changed, false, err
-		}
+	for ns, nsObj := range targetNamespaces {
 		if !checkNamespaceConsentWithKind(&nsObj, "ConfigMap", profile.Namespace, srcName, r.Opts.RequireNamespaceConsent) {
+			recordReplicationOutcome("ConfigMap", modeProfile, "consent_denied", 1)
 			log.Info("skipping profile configmap", "namespace", ns, "name", srcName, "reason", "namespace consent denies source")
 			continue
 		}
@@ -320,6 +325,7 @@ func (r *ProfileReconciler) syncProfileConfigMap(
 			target.Name = srcName
 			target.Namespace = ns
 		} else if err := ensureProfileOwnership(target, "ConfigMap", profileRef); err != nil {
+			recordReplicationOutcome("ConfigMap", modeProfile, "conflict", 1)
 			log.Info("skipping profile configmap", "namespace", ns, "name", srcName, "reason", err.Error())
 			continue
 		}
@@ -339,6 +345,7 @@ func (r *ProfileReconciler) syncProfileConfigMap(
 			return nil
 		})
 		if syncErr != nil {
+			recordReplicationOutcome("ConfigMap", modeProfile, "error", 1)
 			log.Error(syncErr, "failed to sync profile configmap", "namespace", ns, "name", srcName)
 			return changed, false, syncErr
 		}
@@ -347,11 +354,24 @@ func (r *ProfileReconciler) syncProfileConfigMap(
 		if op != controllerutil.OperationResultNone {
 			changed++
 			if action := reconcileActionFromOperationResult(op); action != "" {
+				recordReplicationOutcome("ConfigMap", modeProfile, "success", 1)
 				ReconcileChangesTotal.WithLabelValues("ConfigMap", action).Inc()
 			}
 		}
 	}
 	return changed, false, nil
+}
+
+func (r *ProfileReconciler) loadTargetNamespaces(ctx context.Context, targets []string) (map[string]corev1.Namespace, error) {
+	out := make(map[string]corev1.Namespace, len(targets))
+	for _, nsName := range targets {
+		var ns corev1.Namespace
+		if err := r.Get(ctx, client.ObjectKey{Name: nsName}, &ns); err != nil {
+			return nil, err
+		}
+		out[nsName] = ns
+	}
+	return out, nil
 }
 
 // cleanupStaleProfileReplicas deletes profile-owned replicas not present in desired.
@@ -375,6 +395,7 @@ func (r *ProfileReconciler) cleanupStaleProfileReplicas(ctx context.Context, pro
 			return err
 		}
 		CleanupDeletesTotal.WithLabelValues("Secret").Inc()
+		ReconcileChangesTotal.WithLabelValues("Secret", "delete").Inc()
 	}
 
 	var cmList corev1.ConfigMapList
@@ -395,6 +416,7 @@ func (r *ProfileReconciler) cleanupStaleProfileReplicas(ctx context.Context, pro
 			return err
 		}
 		CleanupDeletesTotal.WithLabelValues("ConfigMap").Inc()
+		ReconcileChangesTotal.WithLabelValues("ConfigMap", "delete").Inc()
 	}
 	return nil
 }

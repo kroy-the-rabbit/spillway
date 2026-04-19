@@ -14,6 +14,15 @@ var ReplicationsTotal = prometheus.NewCounterVec(
 	[]string{"kind", "result"}, // result: "success" | "error"
 )
 
+var ReplicationOutcomesTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Namespace: "spillway",
+		Name:      "replication_outcomes_total",
+		Help:      "Total replication outcomes by kind, mode, and outcome.",
+	},
+	[]string{"kind", "mode", "outcome"},
+)
+
 var ReconcileChangesTotal = prometheus.NewCounterVec(
 	prometheus.CounterOpts{
 		Namespace: "spillway",
@@ -41,8 +50,20 @@ var ReplicaRemapFailuresTotal = prometheus.NewCounterVec(
 	[]string{"kind", "reason"}, // reason: "nil_object" | "malformed_source_from"
 )
 
+func recordReplicationOutcome(kind, mode, outcome string, count int) {
+	if count <= 0 {
+		return
+	}
+	ReplicationOutcomesTotal.WithLabelValues(kind, mode, outcome).Add(float64(count))
+	switch outcome {
+	case "success", "error":
+		ReplicationsTotal.WithLabelValues(kind, outcome).Add(float64(count))
+	}
+}
+
 func init() {
 	metrics.Registry.MustRegister(ReplicationsTotal)
+	metrics.Registry.MustRegister(ReplicationOutcomesTotal)
 	metrics.Registry.MustRegister(ReconcileChangesTotal)
 	metrics.Registry.MustRegister(CleanupDeletesTotal)
 	metrics.Registry.MustRegister(ReplicaRemapFailuresTotal)

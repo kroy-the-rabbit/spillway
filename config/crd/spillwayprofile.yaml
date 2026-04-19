@@ -37,6 +37,7 @@ spec:
               properties:
                 targetNamespaces:
                   type: array
+                  x-kubernetes-list-type: set
                   description: >
                     Explicit namespace names or glob patterns to replicate into.
                     Union with targetSelector when both are set.
@@ -68,18 +69,24 @@ spec:
                               type: string
                 excludeNamespaces:
                   type: array
+                  x-kubernetes-list-type: set
                   description: >
                     Namespace names or glob patterns to exclude. Exclusions always win.
                   items:
                     type: string
                 sources:
                   type: array
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys: ["kind", "name"]
                   description: >
                     Secrets and ConfigMaps in the profile's namespace to replicate.
                   minItems: 1
                   items:
                     type: object
                     required: ["kind", "name"]
+                    x-kubernetes-validations:
+                      - rule: "!(has(self.includeKeys) && size(self.includeKeys) > 0 && has(self.excludeKeys) && size(self.excludeKeys) > 0)"
+                        message: "includeKeys and excludeKeys are mutually exclusive"
                     properties:
                       kind:
                         type: string
@@ -87,9 +94,11 @@ spec:
                         description: The type of resource to replicate.
                       name:
                         type: string
+                        minLength: 1
                         description: Name of the source object in the profile's namespace.
                       includeKeys:
                         type: array
+                        x-kubernetes-list-type: set
                         description: >
                           Whitelist of data keys to copy into replicas. Mutually exclusive
                           with excludeKeys; includeKeys takes precedence.
@@ -97,6 +106,7 @@ spec:
                           type: string
                       excludeKeys:
                         type: array
+                        x-kubernetes-list-type: set
                         description: Blacklist of data keys to omit from replicas.
                         items:
                           type: string
@@ -105,6 +115,7 @@ spec:
               properties:
                 replicatedNamespaces:
                   type: array
+                  x-kubernetes-list-type: set
                   description: Namespaces currently receiving replicas from this profile.
                   items:
                     type: string

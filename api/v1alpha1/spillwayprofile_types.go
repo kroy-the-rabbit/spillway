@@ -26,6 +26,7 @@ type SpillwayProfileList struct {
 type SpillwayProfileSpec struct {
 	// TargetNamespaces lists explicit namespace names (and glob patterns) to
 	// replicate into. Union with TargetSelector when both are set.
+	// +listType=set
 	TargetNamespaces []string `json:"targetNamespaces,omitempty"`
 
 	// TargetSelector selects target namespaces by label. Union with
@@ -34,32 +35,43 @@ type SpillwayProfileSpec struct {
 
 	// ExcludeNamespaces lists namespace names or glob patterns to exclude.
 	// Exclusions always win over includes.
+	// +listType=set
 	ExcludeNamespaces []string `json:"excludeNamespaces,omitempty"`
 
 	// Sources lists the Secrets and ConfigMaps in the profile's own namespace
 	// to replicate. Each source is replicated independently.
+	// +kubebuilder:validation:MinItems=1
+	// +listType=map
+	// +listMapKey=kind
+	// +listMapKey=name
 	Sources []ProfileSource `json:"sources"`
 }
 
 // ProfileSource identifies one Secret or ConfigMap to replicate.
+// +kubebuilder:validation:XValidation:rule="!(has(self.includeKeys) && size(self.includeKeys) > 0 && has(self.excludeKeys) && size(self.excludeKeys) > 0)",message="includeKeys and excludeKeys are mutually exclusive"
 type ProfileSource struct {
 	// Kind is "Secret" or "ConfigMap".
+	// +kubebuilder:validation:Enum=Secret;ConfigMap
 	Kind string `json:"kind"`
 
 	// Name is the name of the source object in the profile's namespace.
+	// +kubebuilder:validation:MinLength=1
 	Name string `json:"name"`
 
 	// IncludeKeys limits which data keys are copied into replicas (whitelist).
 	// Mutually exclusive with ExcludeKeys; IncludeKeys takes precedence.
+	// +listType=set
 	IncludeKeys []string `json:"includeKeys,omitempty"`
 
 	// ExcludeKeys removes specific data keys from replicas (blacklist).
+	// +listType=set
 	ExcludeKeys []string `json:"excludeKeys,omitempty"`
 }
 
 type SpillwayProfileStatus struct {
 	// ReplicatedNamespaces lists the namespaces currently receiving replicas
 	// from this profile.
+	// +listType=set
 	ReplicatedNamespaces []string `json:"replicatedNamespaces,omitempty"`
 
 	// Conditions reflect the profile's reconciliation health.

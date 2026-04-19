@@ -56,6 +56,7 @@ func reconcileObject[T client.Object](
 	excludeSelector := listExcludeSelector(src)
 	matchingSel, err := listMatchingSelector(src)
 	if err != nil {
+		recordReplicationOutcome(cfg.kind, modeAnnotation, "invalid_selector", 1)
 		log.Info("invalid replicate-to-matching selector; skipping until annotation is fixed", "error", err.Error())
 		if recorder != nil {
 			recorder.Eventf(src, corev1.EventTypeWarning, "InvalidSelector",
@@ -192,11 +193,13 @@ func reconcileObject[T client.Object](
 		})
 		if syncErr != nil {
 			if isOwnershipConflict(syncErr) {
+				recordReplicationOutcome(cfg.kind, modeAnnotation, "conflict", 1)
 				auditLog(log, auditConflict, modeAnnotation,
 					cfg.kind, src.GetNamespace(), src.GetName(), ns,
 					syncErr.Error())
 				skippedConflicts++
 			} else {
+				recordReplicationOutcome(cfg.kind, modeAnnotation, "error", 1)
 				log.Error(syncErr, "failed to sync "+cfg.kind+" to target namespace", "namespace", ns)
 				errs = append(errs, syncErr)
 			}
@@ -206,6 +209,7 @@ func reconcileObject[T client.Object](
 			changedCount++
 			action := reconcileActionFromOperationResult(op)
 			if action != "" {
+				recordReplicationOutcome(cfg.kind, modeAnnotation, "success", 1)
 				auditLog(log, action, modeAnnotation,
 					cfg.kind, src.GetNamespace(), src.GetName(), ns, "")
 				ReconcileChangesTotal.WithLabelValues(cfg.kind, action).Inc()
@@ -252,7 +256,6 @@ func reconcileObject[T client.Object](
 		if changedCount > 0 {
 			recorder.Eventf(src, corev1.EventTypeNormal, "ReplicationSucceeded",
 				"Applied %d change(s) across %d target namespace(s)", changedCount, len(targets))
-			ReplicationsTotal.WithLabelValues(cfg.kind, "success").Add(float64(changedCount))
 		}
 		if skippedConflicts > 0 {
 			recorder.Eventf(src, corev1.EventTypeNormal, "ReplicationSkipped",
@@ -261,7 +264,6 @@ func reconcileObject[T client.Object](
 	} else {
 		recorder.Eventf(src, corev1.EventTypeWarning, "ReplicationFailed",
 			"Failed to replicate to %d/%d namespace(s)", len(errs), len(targets))
-		ReplicationsTotal.WithLabelValues(cfg.kind, "error").Add(float64(len(errs)))
 		if skippedConflicts > 0 {
 			recorder.Eventf(src, corev1.EventTypeNormal, "ReplicationSkipped",
 				"Skipped %d target namespace(s) with pre-existing unmanaged objects", skippedConflicts)
