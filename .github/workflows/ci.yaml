@@ -23,7 +23,27 @@ jobs:
 
       - name: Verify gofmt
         run: |
-          test -z "$(gofmt -l $(go list -f '{{.Dir}}' ./...))"
+          test -z "$(gofmt -l cmd internal api)"
+
+      - name: Install envtest assets
+        run: |
+          # Pick the envtest control plane that matches the k8s.io/client-go
+          # minor version in go.mod (v0.30.x -> 1.30.x).
+          K8S_MINOR="$(go list -m -f '{{.Version}}' k8s.io/client-go | sed -E 's/^v0\.([0-9]+)\..*/\1/')"
+          echo "k8s.io/client-go minor: ${K8S_MINOR}"
+          ASSETS="$(go run sigs.k8s.io/controller-runtime/tools/setup-envtest@latest use "1.${K8S_MINOR}.x" -p path)"
+          echo "KUBEBUILDER_ASSETS=${ASSETS}" >> "$GITHUB_ENV"
+          echo "KUBEBUILDER_ASSETS=${ASSETS}"
+
+      - name: Run envtest tests (fail if skipped)
+        run: |
+          go test ./internal/controller/ -run Envtest -v -count=1 2>&1 | tee /tmp/envtest.log
+          test "${PIPESTATUS[0]}" -eq 0
+          if grep -q -- '--- SKIP' /tmp/envtest.log; then
+            echo "::error::envtest tests were skipped (KUBEBUILDER_ASSETS=${KUBEBUILDER_ASSETS})"
+            exit 1
+          fi
+          grep -q -- '--- PASS: TestSecretEnvtest' /tmp/envtest.log
 
       - name: Run unit and smoke tests
         run: go test ./...
@@ -111,3 +131,84 @@ jobs:
             --set image.tag=test \
             --dry-run --debug > /tmp/spillway-install-dry-run.txt
           test -s /tmp/spillway-install-dry-run.txt
+
+  e2e:
+    runs-on: ubuntu-latest
+    env:
+      KIND_CLUSTER: spillway-e2e
+      IMAGE_REPOSITORY: spillway
+      IMAGE_TAG: e2e
+      SPILLWAY_NAMESPACE: spillway-system
+      PREVIOUS_CHART_VERSION: "0.4.4"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Setup Helm
+        uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
+
+      - name: Create kind cluster
+        uses: helm/kind-action@06c1ae10762d3b9c1644e7fe69596ae519e015a2 # v1.15.0
+        with:
+          cluster_name: ${{ env.KIND_CLUSTER }}
+          wait: 120s
+
+      - name: Build image
+        run: docker build -t "${IMAGE_REPOSITORY}:${IMAGE_TAG}" --build-arg VERSION="${IMAGE_TAG}" .
+
+      - name: Load image into kind
+        run: kind load docker-image "${IMAGE_REPOSITORY}:${IMAGE_TAG}" --name "${KIND_CLUSTER}"
+
+      # Upgrade path first, on a fresh cluster: install the previous released
+      # chart from GHCR, replicate a Secret, upgrade in place to the local
+      # chart + e2e image, confirm the replica survived and is still reconciled,
+      # then uninstall. The script waits for the namespace to be gone so the
+      # fresh install below does not race the deletion.
+      - name: Upgrade check (${{ env.PREVIOUS_CHART_VERSION }} OCI chart -> local chart)
+        run: hack/e2e-upgrade.sh
+
+      - name: Fresh install of local chart
+        run: |
+          helm install spillway charts/spillway \
+            --namespace "${SPILLWAY_NAMESPACE}" \
+            --create-namespace \
+            --set image.repository="${IMAGE_REPOSITORY}" \
+            --set image.tag="${IMAGE_TAG}" \
+            --set image.pullPolicy=IfNotPresent \
+            --set metrics.serviceMonitor.enabled=false \
+            --wait --timeout 5m
+          kubectl rollout status deployment/spillway -n "${SPILLWAY_NAMESPACE}" --timeout=180s
+          kubectl get pods -n "${SPILLWAY_NAMESPACE}" -o wide
+
+      - name: Run e2e suite
+        run: hack/e2e.sh
+
+      - name: Dump controller state on failure
+        if: failure()
+        run: |
+          kubectl get pods -A -o wide || true
+          kubectl get events -A --sort-by=.lastTimestamp | tail -n 100 || true
+          kubectl logs -n "${SPILLWAY_NAMESPACE}" -l app.kubernetes.io/name=spillway --all-containers --prefix --tail=300 || true
+
+      - name: Uninstall and verify removal
+        run: |
+          # The chart owns its namespace, so uninstall also deletes the namespace
+          # holding the release record; helm may report "release: not found"
+          # while purging. Verify removal explicitly instead of trusting the
+          # exit code.
+          helm uninstall spillway --namespace "${SPILLWAY_NAMESPACE}" --wait --timeout 5m || true
+          deadline=$((SECONDS + 180))
+          until ! kubectl get deployment spillway -n "${SPILLWAY_NAMESPACE}" >/dev/null 2>&1; do
+            if (( SECONDS > deadline )); then
+              echo "::error::deployment spillway still present after helm uninstall"
+              kubectl get deployment spillway -n "${SPILLWAY_NAMESPACE}" -o yaml
+              exit 1
+            fi
+            sleep 3
+          done
+          echo "PASS: deployment spillway removed after helm uninstall"
+          if helm status spillway --namespace "${SPILLWAY_NAMESPACE}" >/dev/null 2>&1; then
+            echo "::error::helm release spillway still present after uninstall"
+            exit 1
+          fi
+          echo "PASS: helm release spillway removed"

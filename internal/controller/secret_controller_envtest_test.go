@@ -37,6 +37,9 @@ func TestSecretEnvtest_ReplicaDeleteRecreatesViaWatchPipeline(t *testing.T) {
 		t.Fatalf("start envtest: %v", err)
 	}
 	defer func() {
+		// Stop the manager before tearing down the API server; otherwise
+		// envtest waits on an apiserver still being watched and times out.
+		cancel()
 		if stopErr := testEnv.Stop(); stopErr != nil {
 			t.Fatalf("stop envtest: %v", stopErr)
 		}
@@ -60,6 +63,7 @@ func TestSecretEnvtest_ReplicaDeleteRecreatesViaWatchPipeline(t *testing.T) {
 		Client:           mgr.GetClient(),
 		Scheme:           mgr.GetScheme(),
 		Log:              ctrl.Log.WithName("test").WithName("secret"),
+		Recorder:         mgr.GetEventRecorderFor("spillway-secret"),
 		SelfHealInterval: 0, // prove delete watch/remap pipeline, not timer fallback
 	}).SetupWithManager(mgr); err != nil {
 		t.Fatalf("setup secret reconciler: %v", err)
