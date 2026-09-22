@@ -20,7 +20,7 @@ KUSTOMIZATION=config/default/kustomization.yaml
 PROSE=(README.md docs/install.md)
 CHANGELOG=CHANGELOG.md
 REPO_URL=https://github.com/kroy-the-rabbit/spillway
-SEMVER='[0-9]+\.[0-9]+\.[0-9]+'
+SEMVER='[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?'
 
 chart_version() { awk '/^version:/{print $2}' "$CHART"; }
 app_version()   { awk -F'"' '/^appVersion:/{print $2}' "$CHART"; }
@@ -69,7 +69,7 @@ roll_changelog() {
 
 bump() {
   local new="$1"
-  [[ "$new" =~ ^${SEMVER}(-[0-9A-Za-z.-]+)?$ ]] || { echo "not a version: $new" >&2; exit 2; }
+  [[ "$new" =~ ^${SEMVER}$ ]] || { echo "not a version: $new" >&2; exit 2; }
   local old; old="$(chart_version)"
   [[ "$old" != "$new" ]] || { echo "already at $new"; return 0; }
   sed -i -E "s/^version: .*/version: ${new}/; s/^appVersion: .*/appVersion: \"${new}\"/" "$CHART"
