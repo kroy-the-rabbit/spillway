@@ -1,14 +1,10 @@
-{{- /* Generated from config/crd/spillway.kroy.io_spillwayprofiles.yaml by hack/sync-crd.sh. DO NOT EDIT. Regenerate with: hack/sync-crd.sh */}}
-{{- if .Values.installCRDs }}
+---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
-  name: spillwayprofiles.spillway.kroy.io
-  labels:
-    {{- include "spillway.labels" . | nindent 4 }}
   annotations:
-    "helm.sh/resource-policy": keep
     controller-gen.kubebuilder.io/version: v0.22.0
+  name: spillwayprofiles.spillway.kroy.io
 spec:
   group: spillway.kroy.io
   names:
@@ -246,4 +242,3 @@ spec:
     storage: true
     subresources:
       status: {}
-{{- end }}
