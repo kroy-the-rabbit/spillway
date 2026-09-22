@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-21
+
 ### Added
 
 - `CHANGELOG.md`, backfilled from v0.3.0.
@@ -148,7 +150,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Reconcile cleanup now uses an indexed, bounded List instead of scanning all objects cluster-wide, improving scalability on clusters with many replicas.
 - RBAC updated for the `spillwayprofiles` resource in both the Kustomize manifests and the Helm chart; the release pipeline and Helm chart defaults now use `appVersion`-derived image tags.
 
-[Unreleased]: https://github.com/kroy-the-rabbit/spillway/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/kroy-the-rabbit/spillway/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/kroy-the-rabbit/spillway/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/kroy-the-rabbit/spillway/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/kroy-the-rabbit/spillway/compare/v0.4.4...v0.5.0
 [0.4.4]: https://github.com/kroy-the-rabbit/spillway/compare/v0.4.3...v0.4.4
