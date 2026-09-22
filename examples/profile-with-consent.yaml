@@ -11,7 +11,7 @@
 # The same format used for direct-annotation sources.
 
 # Platform profile — offers a shared TLS bundle and registry pull secret.
-apiVersion: spillway.kroy.io/v1alpha1
+apiVersion: spillway.kroy.io/v1
 kind: SpillwayProfile
 metadata:
   name: platform-bundle

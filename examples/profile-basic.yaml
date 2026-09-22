@@ -19,7 +19,7 @@
 #     --from-literal=LOG_LEVEL=info \
 #     --from-literal=SENTRY_DSN=https://...
 
-apiVersion: spillway.kroy.io/v1alpha1
+apiVersion: spillway.kroy.io/v1
 kind: SpillwayProfile
 metadata:
   name: platform-defaults

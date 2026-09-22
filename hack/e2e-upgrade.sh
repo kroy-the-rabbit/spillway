@@ -3,11 +3,16 @@
 #
 # 1. Installs the previously released chart from the OCI registry.
 # 2. Creates an annotated Secret and waits for its replica.
-# 3. Upgrades the release in place to the local chart (charts/spillway) with
+# 3. Creates a spillway.kroy.io/v1alpha1 SpillwayProfile (the only version
+#    the previous releases serve) and waits for its replica.
+# 4. Upgrades the release in place to the local chart (charts/spillway) with
 #    the locally built image.
-# 4. Asserts the replica survived the upgrade and that the source is still
+# 5. Asserts the replica survived the upgrade and that the source is still
 #    reconciled (edit source -> replica updates).
-# 5. Uninstalls the release and asserts the Deployment is gone.
+# 6. Asserts the profile stored as v1alpha1 is readable through the v1
+#    endpoint, is still reconciled by the upgraded controller, and that
+#    hack/migrate-storage-version.sh leaves the CRD storing only v1.
+# 7. Uninstalls the release and asserts the Deployment is gone.
 #
 # Requirements: kubectl and helm on PATH; KUBECONFIG (or the default context)
 # pointing at a cluster that already has the image ${IMAGE_REPOSITORY}:${IMAGE_TAG}
@@ -16,7 +21,7 @@
 # Environment:
 #   PREVIOUS_CHART           OCI reference of the released chart
 #                            (default oci://ghcr.io/kroy-the-rabbit/charts/spillway)
-#   PREVIOUS_CHART_VERSION   released chart version to start from (default 0.4.4)
+#   PREVIOUS_CHART_VERSION   released chart version to start from (default 0.6.0)
 #   CHART_DIR                local chart to upgrade to (default charts/spillway)
 #   IMAGE_REPOSITORY         image repository for the upgraded release (default spillway)
 #   IMAGE_TAG                image tag for the upgraded release (default e2e)
@@ -27,7 +32,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PREVIOUS_CHART="${PREVIOUS_CHART:-oci://ghcr.io/kroy-the-rabbit/charts/spillway}"
-PREVIOUS_CHART_VERSION="${PREVIOUS_CHART_VERSION:-0.4.4}"
+PREVIOUS_CHART_VERSION="${PREVIOUS_CHART_VERSION:-0.6.0}"
 CHART_DIR="${CHART_DIR:-${REPO_ROOT}/charts/spillway}"
 IMAGE_REPOSITORY="${IMAGE_REPOSITORY:-spillway}"
 IMAGE_TAG="${IMAGE_TAG:-e2e}"
@@ -38,6 +43,9 @@ TIMEOUT="${E2E_TIMEOUT:-60}"
 SRC_NS="upgrade-src"
 DST_NS="upgrade-dst"
 SECRET_NAME="upgrade-token"
+PROFILE_NAME="upgrade-profile"
+PROFILE_CM="upgrade-env"
+CRD_NAME="spillwayprofiles.spillway.kroy.io"
 
 failures=0
 passes=0
@@ -71,6 +79,31 @@ deployment_image_is() {
   [[ "$actual" == "$1" ]]
 }
 
+configmap_value_equals() {
+  local actual
+  actual="$(kubectl get configmap -n "$1" "$2" -o jsonpath="{.data.$3}" 2>/dev/null)" || return 1
+  [[ "$actual" == "$4" ]]
+}
+
+# crd_stored_versions_are <json-array>
+# Compares status.storedVersions of the SpillwayProfile CRD verbatim.
+crd_stored_versions_are() {
+  local actual
+  actual="$(kubectl get crd "$CRD_NAME" -o jsonpath='{.status.storedVersions}' 2>/dev/null)" || return 1
+  [[ "$actual" == "$1" ]]
+}
+
+# crd_stored_versions_contain <version>
+crd_stored_versions_contain() {
+  kubectl get crd "$CRD_NAME" -o jsonpath='{.status.storedVersions}' 2>/dev/null | grep -q "\"$1\""
+}
+
+crd_storage_version_is() {
+  local actual
+  actual="$(kubectl get crd "$CRD_NAME" -o jsonpath='{.spec.versions[?(@.storage==true)].name}' 2>/dev/null)" || return 1
+  [[ "$actual" == "$1" ]]
+}
+
 release_chart_is() {
   local actual
   actual="$(helm list -n "$NS" -o json | tr -d '\n' | sed -nE "s/.*\"name\":\"${RELEASE}\"[^}]*\"chart\":\"([^\"]+)\".*/\1/p")" || return 1
@@ -83,9 +116,11 @@ rollout_ok() {
 
 cleanup() {
   echo "cleaning up"
-  # Remove the source first so the (still running) controller can honour its
-  # finalizer and delete the replica before the controller goes away.
+  # Remove the source and profile first so the (still running) controller can
+  # honour their finalizers and delete the replicas before it goes away.
+  kubectl delete spillwayprofile -n "$SRC_NS" "$PROFILE_NAME" --ignore-not-found --timeout=60s >/dev/null 2>&1 || true
   kubectl delete secret -n "$SRC_NS" "$SECRET_NAME" --ignore-not-found --timeout=60s >/dev/null 2>&1 || true
+  kubectl delete configmap -n "$SRC_NS" "$PROFILE_CM" --ignore-not-found --timeout=60s >/dev/null 2>&1 || true
   kubectl delete namespace "$SRC_NS" "$DST_NS" --ignore-not-found --wait=false >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
@@ -120,6 +155,31 @@ wait_until "replica created in ${DST_NS} by ${PREVIOUS_CHART_VERSION}" \
   secret_token_equals "$DST_NS" "$SECRET_NAME" before-upgrade
 replica_uid_before="$(kubectl get secret -n "$DST_NS" "$SECRET_NAME" -o jsonpath='{.metadata.uid}')"
 
+echo "== create a v1alpha1 SpillwayProfile with the previous release"
+# Releases before 1.0 only serve spillway.kroy.io/v1alpha1, so this is the
+# version every pre-upgrade profile is persisted as.
+assert_now "previous release stores SpillwayProfile as v1alpha1" \
+  crd_storage_version_is v1alpha1
+kubectl create configmap "$PROFILE_CM" --namespace "$SRC_NS" \
+  --from-literal=LOG_LEVEL=before-upgrade \
+  --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+kubectl apply -f - >/dev/null <<YAML
+apiVersion: spillway.kroy.io/v1alpha1
+kind: SpillwayProfile
+metadata:
+  name: ${PROFILE_NAME}
+  namespace: ${SRC_NS}
+spec:
+  targetNamespaces:
+    - ${DST_NS}
+  sources:
+    - kind: ConfigMap
+      name: ${PROFILE_CM}
+YAML
+wait_until "profile replica created in ${DST_NS} by ${PREVIOUS_CHART_VERSION}" \
+  configmap_value_equals "$DST_NS" "$PROFILE_CM" LOG_LEVEL before-upgrade
+profile_uid_before="$(kubectl get spillwayprofile -n "$SRC_NS" "$PROFILE_NAME" -o jsonpath='{.metadata.uid}')"
+
 echo "== upgrade to local chart ${CHART_DIR} with image ${IMAGE_REPOSITORY}:${IMAGE_TAG}"
 helm upgrade "$RELEASE" "$CHART_DIR" \
   --namespace "$NS" \
@@ -150,11 +210,59 @@ kubectl patch secret -n "$SRC_NS" "$SECRET_NAME" --type merge \
 wait_until "replica in ${DST_NS} updated by the upgraded controller" \
   secret_token_equals "$DST_NS" "$SECRET_NAME" after-upgrade
 
+echo "== profile stored as v1alpha1 is served as v1 after the upgrade"
+assert_now "CRD storage version is v1 after the upgrade" \
+  crd_storage_version_is v1
+assert_now "CRD still serves v1alpha1" \
+  bash -c "kubectl get crd '$CRD_NAME' -o jsonpath='{.spec.versions[?(@.name==\"v1alpha1\")].served}' | grep -qx true"
+assert_now "CRD storedVersions still lists v1alpha1 before migration" \
+  crd_stored_versions_contain v1alpha1
+assert_now "CRD storedVersions lists v1 after the CRD upgrade" \
+  crd_stored_versions_contain v1
+assert_now "profile readable via spillwayprofiles.v1.spillway.kroy.io" \
+  kubectl get spillwayprofiles.v1.spillway.kroy.io -n "$SRC_NS" "$PROFILE_NAME"
+assert_now "profile still readable via spillwayprofiles.v1alpha1.spillway.kroy.io" \
+  kubectl get spillwayprofiles.v1alpha1.spillway.kroy.io -n "$SRC_NS" "$PROFILE_NAME"
+profile_uid_after="$(kubectl get spillwayprofiles.v1.spillway.kroy.io -n "$SRC_NS" "$PROFILE_NAME" -o jsonpath='{.metadata.uid}')"
+assert_now "profile is the same object under v1 (same uid)" \
+  test "$profile_uid_before" = "$profile_uid_after"
+assert_now "profile replica still present in ${DST_NS} with pre-upgrade data" \
+  configmap_value_equals "$DST_NS" "$PROFILE_CM" LOG_LEVEL before-upgrade
+kubectl patch configmap -n "$SRC_NS" "$PROFILE_CM" --type merge \
+  -p '{"data":{"LOG_LEVEL":"after-upgrade"}}' >/dev/null
+wait_until "profile replica in ${DST_NS} updated by the upgraded controller" \
+  configmap_value_equals "$DST_NS" "$PROFILE_CM" LOG_LEVEL after-upgrade
+
+echo "== migrate stored objects to v1"
+# Run the migration visibly so its per-object log lands in the e2e output.
+if "${REPO_ROOT}/hack/migrate-storage-version.sh"; then
+  pass "hack/migrate-storage-version.sh succeeds"
+else
+  fail "hack/migrate-storage-version.sh succeeds"
+fi
+assert_now "CRD storedVersions is [\"v1\"] after migration" \
+  crd_stored_versions_are '["v1"]'
+if "${REPO_ROOT}/hack/migrate-storage-version.sh" >/dev/null; then
+  pass "hack/migrate-storage-version.sh is idempotent"
+else
+  fail "hack/migrate-storage-version.sh is idempotent"
+fi
+assert_now "CRD storedVersions still [\"v1\"] after a second run" \
+  crd_stored_versions_are '["v1"]'
+assert_now "profile survived the migration (same uid)" \
+  test "$profile_uid_before" = "$(kubectl get spillwayprofile -n "$SRC_NS" "$PROFILE_NAME" -o jsonpath='{.metadata.uid}')"
+kubectl patch configmap -n "$SRC_NS" "$PROFILE_CM" --type merge \
+  -p '{"data":{"LOG_LEVEL":"after-migration"}}' >/dev/null
+wait_until "profile replica in ${DST_NS} updated after the migration" \
+  configmap_value_equals "$DST_NS" "$PROFILE_CM" LOG_LEVEL after-migration
+
 echo "== uninstall"
 cleanup
 trap - EXIT
 wait_until "replica removed from ${DST_NS} after source deletion" \
   bash -c "! kubectl get secret -n '$DST_NS' '$SECRET_NAME'"
+wait_until "profile replica removed from ${DST_NS} after profile deletion" \
+  bash -c "! kubectl get configmap -n '$DST_NS' '$PROFILE_CM'"
 # The chart owns its namespace, so uninstall also deletes the namespace that
 # holds the release record and helm may report "release: not found" while
 # purging it. Removal is verified explicitly below instead of via exit code.

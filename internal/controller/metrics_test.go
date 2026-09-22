@@ -9,7 +9,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
-	spillwayv1alpha1 "spillway/api/v1alpha1"
+	spillwayv1 "spillway/api/v1"
 )
 
 func resetMetricsForTest() {
@@ -57,11 +57,11 @@ func TestProfileReconcileRecordsConsentDeniedOutcome(t *testing.T) {
 			Annotations: map[string]string{AnnotationAcceptFrom: "ConfigMap/platform/*"},
 		},
 	}
-	profile := &spillwayv1alpha1.SpillwayProfile{
+	profile := &spillwayv1.SpillwayProfile{
 		ObjectMeta: metav1.ObjectMeta{Name: "deny-profile", Namespace: "platform"},
-		Spec: spillwayv1alpha1.SpillwayProfileSpec{
+		Spec: spillwayv1.SpillwayProfileSpec{
 			TargetNamespaces: []string{"team-a"},
-			Sources: []spillwayv1alpha1.ProfileSource{
+			Sources: []spillwayv1.ProfileSource{
 				{Kind: "Secret", Name: "platform-token"},
 			},
 		},
@@ -93,11 +93,11 @@ func TestProfileReconcileRecordsConsentDeniedOutcome(t *testing.T) {
 func TestProfileReconcileRecordsMissingSourceOutcome(t *testing.T) {
 	resetMetricsForTest()
 
-	profile := &spillwayv1alpha1.SpillwayProfile{
+	profile := &spillwayv1.SpillwayProfile{
 		ObjectMeta: metav1.ObjectMeta{Name: "missing-profile", Namespace: "platform"},
-		Spec: spillwayv1alpha1.SpillwayProfileSpec{
+		Spec: spillwayv1.SpillwayProfileSpec{
 			TargetNamespaces: []string{"team-a"},
-			Sources: []spillwayv1alpha1.ProfileSource{
+			Sources: []spillwayv1.ProfileSource{
 				{Kind: "Secret", Name: "does-not-exist"},
 			},
 		},

@@ -25,7 +25,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	spillwayv1alpha1 "spillway/api/v1alpha1"
+	spillwayv1 "spillway/api/v1"
 )
 
 // Condition type constants for SpillwayProfile status.
@@ -53,7 +53,7 @@ type ProfileReconciler struct {
 func (r *ProfileReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := r.Log.WithValues("profile", req.String())
 
-	var profile spillwayv1alpha1.SpillwayProfile
+	var profile spillwayv1.SpillwayProfile
 	if err := r.Get(ctx, req.NamespacedName, &profile); err != nil {
 		if apierrors.IsNotFound(err) {
 			return ctrl.Result{}, nil
@@ -217,7 +217,7 @@ func (r *ProfileReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 func (r *ProfileReconciler) syncProfileSecret(
 	ctx context.Context,
 	log logr.Logger,
-	profile *spillwayv1alpha1.SpillwayProfile,
+	profile *spillwayv1.SpillwayProfile,
 	profileRef, srcName string,
 	kf keyFilter,
 	targetNamespaces map[string]corev1.Namespace,
@@ -291,7 +291,7 @@ func (r *ProfileReconciler) syncProfileSecret(
 func (r *ProfileReconciler) syncProfileConfigMap(
 	ctx context.Context,
 	log logr.Logger,
-	profile *spillwayv1alpha1.SpillwayProfile,
+	profile *spillwayv1.SpillwayProfile,
 	profileRef, srcName string,
 	kf keyFilter,
 	targetNamespaces map[string]corev1.Namespace,
@@ -427,7 +427,7 @@ func (r *ProfileReconciler) sourceRequestsForNamespace(ctx context.Context, obj 
 	if _, ok := obj.(*corev1.Namespace); !ok {
 		return nil
 	}
-	var profiles spillwayv1alpha1.SpillwayProfileList
+	var profiles spillwayv1.SpillwayProfileList
 	if err := r.List(ctx, &profiles); err != nil {
 		r.Log.Error(err, "failed to list profiles for namespace event")
 		return nil
@@ -448,7 +448,7 @@ func (r *ProfileReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	}
 
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&spillwayv1alpha1.SpillwayProfile{}).
+		For(&spillwayv1.SpillwayProfile{}).
 		Watches(
 			&corev1.Secret{},
 			handler.Funcs{

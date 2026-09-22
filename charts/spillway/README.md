@@ -66,7 +66,7 @@ Replicates to every namespace with the label `env=production` — including name
 ### SpillwayProfile
 
 ```yaml
-apiVersion: spillway.kroy.io/v1alpha1
+apiVersion: spillway.kroy.io/v1
 kind: SpillwayProfile
 metadata:
   name: platform-secrets

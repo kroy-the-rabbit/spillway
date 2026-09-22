@@ -7,7 +7,7 @@
 # Two separate profiles achieve this; each profile controls its own scope.
 
 # --- Profile 1: read-only access for all app namespaces ---
-apiVersion: spillway.kroy.io/v1alpha1
+apiVersion: spillway.kroy.io/v1
 kind: SpillwayProfile
 metadata:
   name: app-readonly
@@ -25,7 +25,7 @@ spec:
 
 ---
 # --- Profile 2: full access for ops namespaces ---
-apiVersion: spillway.kroy.io/v1alpha1
+apiVersion: spillway.kroy.io/v1
 kind: SpillwayProfile
 metadata:
   name: ops-full-access

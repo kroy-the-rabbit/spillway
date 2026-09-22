@@ -16,6 +16,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
+	spillwayv1 "spillway/api/v1"
 	spillwayv1alpha1 "spillway/api/v1alpha1"
 	"spillway/internal/controller"
 )
@@ -73,6 +74,10 @@ func main() {
 	scheme := runtime.NewScheme()
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(corev1.AddToScheme(scheme))
+	// v1 is the storage version and the one the controller watches and writes.
+	// v1alpha1 is registered too so the manager can decode either version;
+	// the API server serves both with an identical schema (no conversion).
+	utilruntime.Must(spillwayv1.AddToScheme(scheme))
 	utilruntime.Must(spillwayv1alpha1.AddToScheme(scheme))
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{

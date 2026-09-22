@@ -1,4 +1,4 @@
-package v1alpha1
+package v1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -12,7 +12,7 @@ import (
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Namespaced,shortName=swp
-// +kubebuilder:deprecatedversion:warning="spillway.kroy.io/v1alpha1 SpillwayProfile is deprecated; use spillway.kroy.io/v1"
+// +kubebuilder:storageversion
 type SpillwayProfile struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

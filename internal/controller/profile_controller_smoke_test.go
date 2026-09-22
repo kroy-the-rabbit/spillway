@@ -15,7 +15,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	spillwayv1alpha1 "spillway/api/v1alpha1"
+	spillwayv1 "spillway/api/v1"
 )
 
 func newProfileScheme(t *testing.T) *runtime.Scheme {
@@ -24,8 +24,8 @@ func newProfileScheme(t *testing.T) *runtime.Scheme {
 	if err := corev1.AddToScheme(s); err != nil {
 		t.Fatalf("add corev1 scheme: %v", err)
 	}
-	if err := spillwayv1alpha1.AddToScheme(s); err != nil {
-		t.Fatalf("add v1alpha1 scheme: %v", err)
+	if err := spillwayv1.AddToScheme(s); err != nil {
+		t.Fatalf("add v1 scheme: %v", err)
 	}
 	return s
 }
@@ -36,7 +36,7 @@ func newProfileClient(t *testing.T, objs ...client.Object) client.WithWatch {
 	return fake.NewClientBuilder().
 		WithScheme(s).
 		WithObjects(objs...).
-		WithStatusSubresource(&spillwayv1alpha1.SpillwayProfile{}).
+		WithStatusSubresource(&spillwayv1.SpillwayProfile{}).
 		WithIndex(&corev1.Secret{}, secretProfileRefFieldIdx, func(obj client.Object) []string {
 			return profileRefFieldIndexValue(obj)
 		}).
@@ -68,11 +68,11 @@ func TestProfileReconcileSmoke_ReplicatesSecretToTargetNamespace(t *testing.T) {
 			"extra": []byte("ignore-me"),
 		},
 	}
-	profile := &spillwayv1alpha1.SpillwayProfile{
+	profile := &spillwayv1.SpillwayProfile{
 		ObjectMeta: metav1.ObjectMeta{Name: "my-profile", Namespace: "platform"},
-		Spec: spillwayv1alpha1.SpillwayProfileSpec{
+		Spec: spillwayv1.SpillwayProfileSpec{
 			TargetNamespaces: []string{"team-a"},
-			Sources: []spillwayv1alpha1.ProfileSource{
+			Sources: []spillwayv1.ProfileSource{
 				{Kind: "Secret", Name: "platform-token", IncludeKeys: []string{"token"}},
 			},
 		},
@@ -112,11 +112,11 @@ func TestProfileReconcileSmoke_ReplicatesConfigMapToTargetNamespace(t *testing.T
 		ObjectMeta: metav1.ObjectMeta{Name: "shared-config", Namespace: "platform"},
 		Data:       map[string]string{"host": "db.internal", "port": "5432"},
 	}
-	profile := &spillwayv1alpha1.SpillwayProfile{
+	profile := &spillwayv1.SpillwayProfile{
 		ObjectMeta: metav1.ObjectMeta{Name: "cfg-profile", Namespace: "platform"},
-		Spec: spillwayv1alpha1.SpillwayProfileSpec{
+		Spec: spillwayv1.SpillwayProfileSpec{
 			TargetNamespaces: []string{"team-b"},
-			Sources: []spillwayv1alpha1.ProfileSource{
+			Sources: []spillwayv1.ProfileSource{
 				{Kind: "ConfigMap", Name: "shared-config"},
 			},
 		},
@@ -158,16 +158,16 @@ func TestProfileReconcileSmoke_CleanupOnDeletion(t *testing.T) {
 		},
 	}
 	now := metav1.Now()
-	profile := &spillwayv1alpha1.SpillwayProfile{
+	profile := &spillwayv1.SpillwayProfile{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:              "my-profile",
 			Namespace:         "platform",
 			DeletionTimestamp: &now,
 			Finalizers:        []string{FinalizerName},
 		},
-		Spec: spillwayv1alpha1.SpillwayProfileSpec{
+		Spec: spillwayv1.SpillwayProfileSpec{
 			TargetNamespaces: []string{"team-a"},
-			Sources: []spillwayv1alpha1.ProfileSource{
+			Sources: []spillwayv1.ProfileSource{
 				{Kind: "Secret", Name: "platform-token"},
 			},
 		},
@@ -192,11 +192,11 @@ func TestProfileReconcileSmoke_CleanupOnDeletion(t *testing.T) {
 }
 
 func TestProfileReconcileSmoke_SkipsMissingSource(t *testing.T) {
-	profile := &spillwayv1alpha1.SpillwayProfile{
+	profile := &spillwayv1.SpillwayProfile{
 		ObjectMeta: metav1.ObjectMeta{Name: "my-profile", Namespace: "platform"},
-		Spec: spillwayv1alpha1.SpillwayProfileSpec{
+		Spec: spillwayv1.SpillwayProfileSpec{
 			TargetNamespaces: []string{"team-a"},
-			Sources: []spillwayv1alpha1.ProfileSource{
+			Sources: []spillwayv1.ProfileSource{
 				{Kind: "Secret", Name: "does-not-exist"},
 			},
 		},
@@ -219,11 +219,11 @@ func TestProfileReconcileSmoke_ConditionsSetOnSuccess(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "platform-token", Namespace: "platform"},
 		Data:       map[string][]byte{"token": []byte("s3cr3t")},
 	}
-	profile := &spillwayv1alpha1.SpillwayProfile{
+	profile := &spillwayv1.SpillwayProfile{
 		ObjectMeta: metav1.ObjectMeta{Name: "cond-profile", Namespace: "platform"},
-		Spec: spillwayv1alpha1.SpillwayProfileSpec{
+		Spec: spillwayv1.SpillwayProfileSpec{
 			TargetNamespaces: []string{"team-a"},
-			Sources: []spillwayv1alpha1.ProfileSource{
+			Sources: []spillwayv1.ProfileSource{
 				{Kind: "Secret", Name: "platform-token"},
 			},
 		},
@@ -240,7 +240,7 @@ func TestProfileReconcileSmoke_ConditionsSetOnSuccess(t *testing.T) {
 		t.Fatalf("reconcile error: %v", err)
 	}
 
-	var updated spillwayv1alpha1.SpillwayProfile
+	var updated spillwayv1.SpillwayProfile
 	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "platform", Name: "cond-profile"}, &updated); err != nil {
 		t.Fatalf("get profile: %v", err)
 	}
@@ -271,11 +271,11 @@ func TestProfileReconcileSmoke_TLSProjectionDowngradesReplicaTypeWhenKeyMissing(
 			corev1.TLSPrivateKeyKey: []byte("key"),
 		},
 	}
-	profile := &spillwayv1alpha1.SpillwayProfile{
+	profile := &spillwayv1.SpillwayProfile{
 		ObjectMeta: metav1.ObjectMeta{Name: "tls-profile", Namespace: "platform"},
-		Spec: spillwayv1alpha1.SpillwayProfileSpec{
+		Spec: spillwayv1.SpillwayProfileSpec{
 			TargetNamespaces: []string{"team-a"},
-			Sources: []spillwayv1alpha1.ProfileSource{
+			Sources: []spillwayv1.ProfileSource{
 				{Kind: "Secret", Name: "shared-cert", IncludeKeys: []string{corev1.TLSCertKey}},
 			},
 		},
@@ -313,11 +313,11 @@ func TestProfileReconcileSmoke_TLSProjectionPreservesTLSTypeWhenKeysRemainComple
 			corev1.TLSPrivateKeyKey: []byte("key"),
 		},
 	}
-	profile := &spillwayv1alpha1.SpillwayProfile{
+	profile := &spillwayv1.SpillwayProfile{
 		ObjectMeta: metav1.ObjectMeta{Name: "tls-profile", Namespace: "platform"},
-		Spec: spillwayv1alpha1.SpillwayProfileSpec{
+		Spec: spillwayv1.SpillwayProfileSpec{
 			TargetNamespaces: []string{"team-a"},
-			Sources: []spillwayv1alpha1.ProfileSource{
+			Sources: []spillwayv1.ProfileSource{
 				{Kind: "Secret", Name: "shared-cert", IncludeKeys: []string{corev1.TLSCertKey, corev1.TLSPrivateKeyKey}},
 			},
 		},
@@ -344,11 +344,11 @@ func TestProfileReconcileSmoke_TLSProjectionPreservesTLSTypeWhenKeysRemainComple
 }
 
 func TestProfileReconcileSmoke_ConditionsSetOnMissingSource(t *testing.T) {
-	profile := &spillwayv1alpha1.SpillwayProfile{
+	profile := &spillwayv1.SpillwayProfile{
 		ObjectMeta: metav1.ObjectMeta{Name: "cond-profile2", Namespace: "platform"},
-		Spec: spillwayv1alpha1.SpillwayProfileSpec{
+		Spec: spillwayv1.SpillwayProfileSpec{
 			TargetNamespaces: []string{"team-a"},
-			Sources: []spillwayv1alpha1.ProfileSource{
+			Sources: []spillwayv1.ProfileSource{
 				{Kind: "Secret", Name: "missing-secret"},
 			},
 		},
@@ -365,7 +365,7 @@ func TestProfileReconcileSmoke_ConditionsSetOnMissingSource(t *testing.T) {
 		t.Fatalf("reconcile should not error on missing source, got: %v", err)
 	}
 
-	var updated spillwayv1alpha1.SpillwayProfile
+	var updated spillwayv1.SpillwayProfile
 	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "platform", Name: "cond-profile2"}, &updated); err != nil {
 		t.Fatalf("get profile: %v", err)
 	}
@@ -398,11 +398,11 @@ func TestProfileReconcileSmoke_ExcludeKeysFilter(t *testing.T) {
 			"host":     []byte("db.internal"),
 		},
 	}
-	profile := &spillwayv1alpha1.SpillwayProfile{
+	profile := &spillwayv1.SpillwayProfile{
 		ObjectMeta: metav1.ObjectMeta{Name: "creds-profile", Namespace: "platform"},
-		Spec: spillwayv1alpha1.SpillwayProfileSpec{
+		Spec: spillwayv1.SpillwayProfileSpec{
 			TargetNamespaces: []string{"team-a"},
-			Sources: []spillwayv1alpha1.ProfileSource{
+			Sources: []spillwayv1.ProfileSource{
 				{Kind: "Secret", Name: "creds", ExcludeKeys: []string{"password"}},
 			},
 		},
@@ -443,11 +443,11 @@ func TestProfileReconcileSmoke_DoesNotAdoptUnmanagedSecret(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "platform-token", Namespace: "team-a"},
 		Data:       map[string][]byte{"token": []byte("keep-me")},
 	}
-	profile := &spillwayv1alpha1.SpillwayProfile{
+	profile := &spillwayv1.SpillwayProfile{
 		ObjectMeta: metav1.ObjectMeta{Name: "my-profile", Namespace: "platform"},
-		Spec: spillwayv1alpha1.SpillwayProfileSpec{
+		Spec: spillwayv1.SpillwayProfileSpec{
 			TargetNamespaces: []string{"team-a"},
-			Sources: []spillwayv1alpha1.ProfileSource{
+			Sources: []spillwayv1.ProfileSource{
 				{Kind: "Secret", Name: "platform-token"},
 			},
 		},
@@ -495,11 +495,11 @@ func TestProfileReconcileSmoke_DoesNotOverwriteAnnotationManagedReplica(t *testi
 		},
 		Data: map[string][]byte{"token": []byte("annotation-owned")},
 	}
-	profile := &spillwayv1alpha1.SpillwayProfile{
+	profile := &spillwayv1.SpillwayProfile{
 		ObjectMeta: metav1.ObjectMeta{Name: "my-profile", Namespace: "platform"},
-		Spec: spillwayv1alpha1.SpillwayProfileSpec{
+		Spec: spillwayv1.SpillwayProfileSpec{
 			TargetNamespaces: []string{"team-a"},
-			Sources: []spillwayv1alpha1.ProfileSource{
+			Sources: []spillwayv1.ProfileSource{
 				{Kind: "Secret", Name: "platform-token"},
 			},
 		},
@@ -537,11 +537,11 @@ func TestProfileReconcileSmoke_EnforcesConsentPerSource(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "shared-config", Namespace: "platform"},
 		Data:       map[string]string{"host": "db.internal"},
 	}
-	profile := &spillwayv1alpha1.SpillwayProfile{
+	profile := &spillwayv1.SpillwayProfile{
 		ObjectMeta: metav1.ObjectMeta{Name: "mixed-profile", Namespace: "platform"},
-		Spec: spillwayv1alpha1.SpillwayProfileSpec{
+		Spec: spillwayv1.SpillwayProfileSpec{
 			TargetNamespaces: []string{"team-a"},
-			Sources: []spillwayv1alpha1.ProfileSource{
+			Sources: []spillwayv1.ProfileSource{
 				{Kind: "Secret", Name: "shared-secret"},
 				{Kind: "ConfigMap", Name: "shared-config"},
 			},
