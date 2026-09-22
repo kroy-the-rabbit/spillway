@@ -302,6 +302,7 @@ This uses local kubeconfig and requires cluster-wide permissions equivalent to t
 In addition to controller-runtime metrics, Spillway exports:
 
 - `spillway_replications_total{kind,result}`
+- `spillway_replication_outcomes_total{kind,mode,outcome}`
 - `spillway_reconcile_changes_total{kind,action}`
 - `spillway_cleanup_deletes_total{kind}`
 - `spillway_replica_remap_failures_total{kind,reason}`

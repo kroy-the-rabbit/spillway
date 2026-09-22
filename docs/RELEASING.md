@@ -16,9 +16,13 @@ Spillway uses tag-driven semantic versioning releases.
 
 ## Release Process
 
-1. Update code/docs/chart.
-2. Set `charts/spillway/Chart.yaml` `version` and `appVersion` to the target version (without `v`).
-3. Update version references in `docs/index.html`, `README.md`, and `config/default/kustomization.yaml` (`newTag`).
+1. Update code/docs/chart. If `api/` changed, run `make manifests` and commit the generated files.
+2. Make sure `CHANGELOG.md` has an entry under `## [Unreleased]` for every user-facing change.
+3. Run `make bump VERSION=X.Y.Z` (without `v`). This is the only supported way to
+   change the version: it stamps `charts/spillway/Chart.yaml` (`version`, `appVersion`),
+   `config/default/kustomization.yaml` (`newTag`), `README.md`, and `docs/index.html`,
+   rolls `[Unreleased]` in `CHANGELOG.md` into a dated `[X.Y.Z]` section, then verifies
+   they all agree. CI runs `make check-version` on every push.
 4. Commit changes.
 5. Create a signed tag: `git tag -s vX.Y.Z -m "Release vX.Y.Z"`.
 6. Push branch and tag.
