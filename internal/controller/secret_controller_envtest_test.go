@@ -63,7 +63,7 @@ func TestSecretEnvtest_ReplicaDeleteRecreatesViaWatchPipeline(t *testing.T) {
 		Client:           mgr.GetClient(),
 		Scheme:           mgr.GetScheme(),
 		Log:              ctrl.Log.WithName("test").WithName("secret"),
-		Recorder:         mgr.GetEventRecorderFor("spillway-secret"),
+		Recorder:         mgr.GetEventRecorder("spillway-secret"),
 		SelfHealInterval: 0, // prove delete watch/remap pipeline, not timer fallback
 	}).SetupWithManager(mgr); err != nil {
 		t.Fatalf("setup secret reconciler: %v", err)

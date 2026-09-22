@@ -10,7 +10,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -35,7 +35,7 @@ func TestConfigMapReconcileSmoke_AllRespectsDefaultExcludes(t *testing.T) {
 		},
 	)
 
-	r := &ConfigMapReconciler{Client: c, Scheme: scheme, Log: log.Log.WithName("test"), Recorder: record.NewFakeRecorder(100)}
+	r := &ConfigMapReconciler{Client: c, Scheme: scheme, Log: log.Log.WithName("test"), Recorder: events.NewFakeRecorder(100)}
 	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "platform", Name: "shared-config"}}); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
@@ -72,7 +72,7 @@ func TestConfigMapReconcileSmoke_ExplicitKubeSystemIncludeOverridesDefault(t *te
 		},
 	)
 
-	r := &ConfigMapReconciler{Client: c, Scheme: scheme, Log: log.Log.WithName("test"), Recorder: record.NewFakeRecorder(100)}
+	r := &ConfigMapReconciler{Client: c, Scheme: scheme, Log: log.Log.WithName("test"), Recorder: events.NewFakeRecorder(100)}
 	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "platform", Name: "shared-config"}}); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
@@ -104,7 +104,7 @@ func TestConfigMapReconcileSmoke_LabelSelectorTargeting(t *testing.T) {
 		},
 	)
 
-	r := &ConfigMapReconciler{Client: c, Scheme: scheme, Log: log.Log.WithName("test"), Recorder: record.NewFakeRecorder(100)}
+	r := &ConfigMapReconciler{Client: c, Scheme: scheme, Log: log.Log.WithName("test"), Recorder: events.NewFakeRecorder(100)}
 	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "platform", Name: "shared-config"}}); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
@@ -138,7 +138,7 @@ func TestConfigMapReconcileSmoke_ManagedByLabelIsSet(t *testing.T) {
 		},
 	)
 
-	r := &ConfigMapReconciler{Client: c, Scheme: scheme, Log: log.Log.WithName("test"), Recorder: record.NewFakeRecorder(100)}
+	r := &ConfigMapReconciler{Client: c, Scheme: scheme, Log: log.Log.WithName("test"), Recorder: events.NewFakeRecorder(100)}
 	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "platform", Name: "shared-config"}}); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
@@ -181,7 +181,7 @@ func TestConfigMapReconcileSmoke_CleanupHandlesManagedReplicaWithoutLabel(t *tes
 		unlabeledReplica,
 	)
 
-	r := &ConfigMapReconciler{Client: c, Scheme: scheme, Log: log.Log.WithName("test"), Recorder: record.NewFakeRecorder(100)}
+	r := &ConfigMapReconciler{Client: c, Scheme: scheme, Log: log.Log.WithName("test"), Recorder: events.NewFakeRecorder(100)}
 	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "platform", Name: "shared-config"}}); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
@@ -208,7 +208,7 @@ func TestConfigMapReconcileSmoke_InvalidMatchingSelectorDoesNotError(t *testing.
 		},
 	)
 
-	r := &ConfigMapReconciler{Client: c, Scheme: scheme, Log: log.Log.WithName("test"), Recorder: record.NewFakeRecorder(100)}
+	r := &ConfigMapReconciler{Client: c, Scheme: scheme, Log: log.Log.WithName("test"), Recorder: events.NewFakeRecorder(100)}
 	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "platform", Name: "shared-config"}}); err != nil {
 		t.Fatalf("expected invalid selector to be handled without reconcile error, got: %v", err)
 	}
@@ -253,7 +253,7 @@ func TestConfigMapReconcileSmoke_TTLExpiry(t *testing.T) {
 		expiredReplica,
 	)
 
-	r := &ConfigMapReconciler{Client: c, Scheme: scheme, Log: log.Log.WithName("test"), Recorder: record.NewFakeRecorder(100)}
+	r := &ConfigMapReconciler{Client: c, Scheme: scheme, Log: log.Log.WithName("test"), Recorder: events.NewFakeRecorder(100)}
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "platform", Name: "app-config"}}
 
 	// First reconcile: detects expiry, removes replica, records team-a as expired.
@@ -308,15 +308,15 @@ func TestConfigMapReconcileSmoke_TTLRemovalClearsExpiredNamespaces(t *testing.T)
 		src,
 	)
 
-	r := &ConfigMapReconciler{Client: c, Scheme: scheme, Log: log.Log.WithName("test"), Recorder: record.NewFakeRecorder(100)}
+	r := &ConfigMapReconciler{Client: c, Scheme: scheme, Log: log.Log.WithName("test"), Recorder: events.NewFakeRecorder(100)}
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "platform", Name: "app-config"}}
 
 	result, err := r.Reconcile(ctx, req)
 	if err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
-	if !result.Requeue {
-		t.Fatal("expected Requeue=true after clearing expired-namespaces")
+	if result != (ctrl.Result{}) {
+		t.Fatalf("expected empty result after clearing expired-namespaces (source update re-enqueues), got %+v", result)
 	}
 
 	var updatedSrc corev1.ConfigMap
@@ -369,7 +369,7 @@ func TestConfigMapReconcileSmoke_OwnershipConflict(t *testing.T) {
 		unmanagedCM,
 	)
 
-	r := &ConfigMapReconciler{Client: c, Scheme: scheme, Log: log.Log.WithName("test"), Recorder: record.NewFakeRecorder(100)}
+	r := &ConfigMapReconciler{Client: c, Scheme: scheme, Log: log.Log.WithName("test"), Recorder: events.NewFakeRecorder(100)}
 	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "platform", Name: "shared-config"}}); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
@@ -418,7 +418,7 @@ func TestConfigMapReconcileSmoke_ForceAdopt(t *testing.T) {
 		unmanagedCM,
 	)
 
-	r := &ConfigMapReconciler{Client: c, Scheme: scheme, Log: log.Log.WithName("test"), Recorder: record.NewFakeRecorder(100), Opts: Options{AllowForceAdopt: true}}
+	r := &ConfigMapReconciler{Client: c, Scheme: scheme, Log: log.Log.WithName("test"), Recorder: events.NewFakeRecorder(100), Opts: Options{AllowForceAdopt: true}}
 	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "platform", Name: "shared-config"}}); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
@@ -473,7 +473,7 @@ func TestConfigMapReconcileSmoke_NamespaceConsent(t *testing.T) {
 		},
 	)
 
-	r := &ConfigMapReconciler{Client: c, Scheme: scheme, Log: log.Log.WithName("test"), Recorder: record.NewFakeRecorder(100)}
+	r := &ConfigMapReconciler{Client: c, Scheme: scheme, Log: log.Log.WithName("test"), Recorder: events.NewFakeRecorder(100)}
 	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "platform", Name: "shared-config"}}); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}

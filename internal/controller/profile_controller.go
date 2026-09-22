@@ -15,7 +15,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -44,7 +44,7 @@ type ProfileReconciler struct {
 	client.Client
 	Scheme           *runtime.Scheme
 	Log              logr.Logger
-	Recorder         record.EventRecorder
+	Recorder         events.EventRecorder
 	SelfHealInterval time.Duration
 	// Opts holds cluster-level security policy settings.
 	Opts Options
@@ -94,7 +94,7 @@ func (r *ProfileReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		if err != nil {
 			recordReplicationOutcome("Profile", modeProfile, "invalid_selector", 1)
 			log.Info("invalid targetSelector", "error", err.Error())
-			r.Recorder.Eventf(&profile, corev1.EventTypeWarning, "InvalidSelector",
+			r.Recorder.Eventf(&profile, nil, corev1.EventTypeWarning, "InvalidSelector", "Reconcile",
 				"Invalid targetSelector: %v", err)
 			return ctrl.Result{}, nil
 		}
@@ -200,10 +200,10 @@ func (r *ProfileReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 
 	if len(errs) == 0 && changedCount > 0 {
-		r.Recorder.Eventf(&profile, corev1.EventTypeNormal, "ReplicationSucceeded",
+		r.Recorder.Eventf(&profile, nil, corev1.EventTypeNormal, "ReplicationSucceeded", "Reconcile",
 			"Applied %d change(s) across %d target namespace(s)", changedCount, len(targets))
 	} else if len(errs) > 0 {
-		r.Recorder.Eventf(&profile, corev1.EventTypeWarning, "ReplicationFailed",
+		r.Recorder.Eventf(&profile, nil, corev1.EventTypeWarning, "ReplicationFailed", "Reconcile",
 			"Encountered %d error(s) during replication", len(errs))
 	}
 

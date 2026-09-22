@@ -8,7 +8,7 @@ import (
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -47,7 +47,7 @@ func reconcileObject[T client.Object](
 	ctx context.Context,
 	c client.Client,
 	log logr.Logger,
-	recorder record.EventRecorder,
+	recorder events.EventRecorder,
 	selfHealInterval time.Duration,
 	cfg reconcileConfig[T],
 	src T,
@@ -59,7 +59,7 @@ func reconcileObject[T client.Object](
 		recordReplicationOutcome(cfg.kind, modeAnnotation, "invalid_selector", 1)
 		log.Info("invalid replicate-to-matching selector; skipping until annotation is fixed", "error", err.Error())
 		if recorder != nil {
-			recorder.Eventf(src, corev1.EventTypeWarning, "InvalidSelector",
+			recorder.Eventf(src, nil, corev1.EventTypeWarning, "InvalidSelector", "Reconcile",
 				"Invalid %s annotation: %v", AnnotationReplicateToMatching, err)
 		}
 		return ctrl.Result{}, nil
@@ -128,7 +128,9 @@ func reconcileObject[T client.Object](
 		if err := c.Update(ctx, src); err != nil {
 			return ctrl.Result{}, err
 		}
-		return ctrl.Result{Requeue: true}, nil
+		// The update above passes sourceObjectPredicate and re-enqueues this
+		// object, so replication proceeds on the next pass.
+		return ctrl.Result{}, nil
 	}
 
 	expiredNS := parseExpiredNamespaces(src)
@@ -254,18 +256,18 @@ func reconcileObject[T client.Object](
 
 	if len(errs) == 0 {
 		if changedCount > 0 {
-			recorder.Eventf(src, corev1.EventTypeNormal, "ReplicationSucceeded",
+			recorder.Eventf(src, nil, corev1.EventTypeNormal, "ReplicationSucceeded", "Reconcile",
 				"Applied %d change(s) across %d target namespace(s)", changedCount, len(targets))
 		}
 		if skippedConflicts > 0 {
-			recorder.Eventf(src, corev1.EventTypeNormal, "ReplicationSkipped",
+			recorder.Eventf(src, nil, corev1.EventTypeNormal, "ReplicationSkipped", "Reconcile",
 				"Skipped %d target namespace(s) with pre-existing unmanaged objects", skippedConflicts)
 		}
 	} else {
-		recorder.Eventf(src, corev1.EventTypeWarning, "ReplicationFailed",
+		recorder.Eventf(src, nil, corev1.EventTypeWarning, "ReplicationFailed", "Reconcile",
 			"Failed to replicate to %d/%d namespace(s)", len(errs), len(targets))
 		if skippedConflicts > 0 {
-			recorder.Eventf(src, corev1.EventTypeNormal, "ReplicationSkipped",
+			recorder.Eventf(src, nil, corev1.EventTypeNormal, "ReplicationSkipped", "Reconcile",
 				"Skipped %d target namespace(s) with pre-existing unmanaged objects", skippedConflicts)
 		}
 	}
