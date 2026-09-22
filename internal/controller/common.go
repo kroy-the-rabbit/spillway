@@ -710,7 +710,7 @@ func sourceRequestsFromManagedReplica(log logr.Logger, obj client.Object, kind, 
 func enqueueReplicaDeleteSourceRemap(
 	ctx context.Context,
 	log logr.Logger,
-	q workqueue.RateLimitingInterface,
+	q workqueue.TypedRateLimitingInterface[reconcile.Request],
 	kind string,
 	evt event.TypedDeleteEvent[client.Object],
 ) {
@@ -732,7 +732,7 @@ func enqueueReplicaDeleteSourceRemap(
 func enqueueProfileFromReplicaDelete(
 	ctx context.Context,
 	log logr.Logger,
-	q workqueue.RateLimitingInterface,
+	q workqueue.TypedRateLimitingInterface[reconcile.Request],
 	evt event.TypedDeleteEvent[client.Object],
 ) {
 	obj := evt.Object
