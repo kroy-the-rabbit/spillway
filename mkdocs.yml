@@ -1,0 +1,69 @@
+site_name: Spillway
+site_url: https://spillway.kroy.io
+site_description: Replicates Kubernetes Secrets and ConfigMaps across namespaces.
+repo_url: https://github.com/kroy-the-rabbit/spillway
+repo_name: kroy-the-rabbit/spillway
+edit_uri: edit/main/docs/
+copyright: Apache-2.0
+
+theme:
+  name: material
+  logo: assets/icon.svg
+  favicon: favicon.svg
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: blue
+      accent: light blue
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: blue
+      accent: light blue
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.sections
+    - navigation.top
+    - search.suggest
+    - content.code.copy
+    - content.tabs.link
+
+nav:
+  - Overview: index.md
+  - Install: install.md
+  - Reference:
+      - Annotations: annotations.md
+      - SpillwayProfile: profiles.md
+      - Operations: operations.md
+      - Security: security.md
+  - Project:
+      - Upgrading: upgrading.md
+      - Changelog: changelog.md
+      - Releasing: releasing.md
+
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.snippets:
+      # Paths in --8<-- blocks resolve against the repo root (where mkdocs runs),
+      # so docs/changelog.md can include CHANGELOG.md without a copy.
+      base_path:
+        - .
+      check_paths: true
+
+validation:
+  omitted_files: warn
+  absolute_links: warn
+  unrecognized_links: warn
+  anchors: warn

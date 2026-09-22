@@ -7,7 +7,7 @@
 # Chart.yaml `version` is the source of truth. Every other site is derived:
 #   - Chart.yaml appVersion
 #   - config/default/kustomization.yaml newTag
-#   - README.md and docs/index.html (every bare X.Y.Z; v-prefixed examples
+#   - README.md and docs/install.md (every bare X.Y.Z; v-prefixed examples
 #     such as `v0.3.0` in prose are ignored)
 #   - CHANGELOG.md: the [Unreleased] section is rolled into a new
 #     [X.Y.Z] - YYYY-MM-DD section and the compare links are updated
@@ -17,7 +17,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 CHART=charts/spillway/Chart.yaml
 KUSTOMIZATION=config/default/kustomization.yaml
-PROSE=(README.md docs/index.html)
+PROSE=(README.md docs/install.md)
 CHANGELOG=CHANGELOG.md
 REPO_URL=https://github.com/kroy-the-rabbit/spillway
 SEMVER='[0-9]+\.[0-9]+\.[0-9]+'

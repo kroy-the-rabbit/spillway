@@ -29,6 +29,9 @@ Thumbs.db
 # Helm packaging output
 *.tgz
 
+# MkDocs build output
+/site/
+
 # Env/local config
 .env
 .env.*
