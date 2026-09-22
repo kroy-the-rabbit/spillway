@@ -14,7 +14,7 @@ rules:
   - apiGroups: [""]
     resources: ["secrets/finalizers", "configmaps/finalizers"]
     verbs: ["update"]
-  - apiGroups: [""]
+  - apiGroups: ["", "events.k8s.io"]
     resources: ["events"]
     verbs: ["create", "patch"]
   - apiGroups: ["coordination.k8s.io"]

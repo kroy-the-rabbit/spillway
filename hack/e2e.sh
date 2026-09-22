@@ -189,6 +189,15 @@ for ns in "${TARGET_NSS[@]}"; do
     data_equals secret "$ns" "$SECRET_NAME" token beta
 done
 
+echo "== controller records events on the source"
+source_has_event() {
+  kubectl get events -n "$SOURCE_NS" \
+    --field-selector "involvedObject.name=$SECRET_NAME,reason=ReplicationSucceeded" \
+    -o name 2>/dev/null | grep -q .
+}
+wait_until "ReplicationSucceeded event recorded on source Secret (events.k8s.io RBAC)" \
+  source_has_event
+
 echo "== deleted replica is recreated"
 kubectl delete secret -n "${TARGET_NSS[0]}" "$SECRET_NAME" >/dev/null
 wait_until "Secret replica in ${TARGET_NSS[0]} recreated after deletion with current data" \
