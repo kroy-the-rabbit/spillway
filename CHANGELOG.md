@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- `SpillwayProfile` is now served at `spillway.kroy.io/v1` (storage version). `v1alpha1` remains served with a deprecation warning and is removed no earlier than 1.2.0. The schema is identical, so no conversion webhook is needed. `hack/migrate-storage-version.sh` rewrites stored objects and trims the CRD's stored versions.
+- A 1.x compatibility promise in the README: annotations, the v1 CRD, controller flags, Helm values, replica markers, and metric names are stable for the whole 1.x line.
+- Documentation site rebuilt with Material for MkDocs from markdown under `docs/`, replacing the single-page landing site. The changelog page is the same file as `CHANGELOG.md`.
+
+### Changed
+
+- Examples and documentation use `apiVersion: spillway.kroy.io/v1`.
+
 ## [0.6.0] - 2026-09-21
 
 ### Changed
