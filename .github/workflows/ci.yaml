@@ -25,6 +25,9 @@ jobs:
         run: |
           test -z "$(gofmt -l cmd internal api)"
 
+      - name: Verify generated code and CRD manifests are current
+        run: make check-generated
+
       - name: Install envtest assets
         run: |
           # Pick the envtest control plane that matches the k8s.io/client-go
@@ -111,6 +114,9 @@ jobs:
 
       - name: Setup Helm
         uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
+
+      - name: Verify version references match Chart.yaml
+        run: hack/bump-version.sh --check
 
       - name: Helm lint
         run: helm lint charts/spillway

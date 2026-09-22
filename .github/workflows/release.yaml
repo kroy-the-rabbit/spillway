@@ -8,6 +8,7 @@ on:
 permissions:
   contents: write
   packages: write
+  id-token: write # keyless cosign signing via GitHub OIDC
 
 jobs:
   release:
@@ -28,6 +29,9 @@ jobs:
 
       - name: Setup Helm
         uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
 
       - name: Set release variables
         id: vars
@@ -55,6 +59,18 @@ jobs:
       - name: Run tests
         run: go test ./...
 
+      # Runs before any build output exists so the source SBOM reflects the
+      # source tree only (not the dist/ binaries and tarballs).
+      - name: Generate source SBOM
+        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
+        with:
+          path: .
+          format: spdx-json
+          artifact-name: spillway_${{ steps.vars.outputs.version }}_source_sbom.spdx.json
+          output-file: ${{ runner.temp }}/spillway_${{ steps.vars.outputs.version }}_source_sbom.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
       - name: Build Linux binaries
         shell: bash
         run: |
@@ -68,6 +84,14 @@ jobs:
             rm -rf "dist/${out}"
           done
           (cd dist && sha256sum *.tar.gz > checksums.txt)
+          mv "${RUNNER_TEMP}/spillway_${{ steps.vars.outputs.version }}_source_sbom.spdx.json" dist/
+
+      - name: Sign checksums (keyless)
+        shell: bash
+        run: |
+          cosign sign-blob --yes \
+            --bundle dist/checksums.txt.sigstore.json \
+            dist/checksums.txt
 
       - name: Login to GHCR
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
@@ -92,6 +116,7 @@ jobs:
             type=raw,value=${{ steps.vars.outputs.major }},enable=${{ steps.vars.outputs.is_prerelease == 'false' }}
 
       - name: Build and push container image
+        id: build
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
@@ -102,13 +127,77 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
+      - name: Sign container image (keyless, by digest)
+        shell: bash
+        env:
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          [[ "$IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          cosign sign --yes "${IMAGE_REPO}@${IMAGE_DIGEST}"
+
+      # syft is given the pushed multi-arch index by digest; SYFT_PLATFORM
+      # selects the per-platform manifest. registry-username forces the
+      # registry source (bypassing the Docker daemon) so platform selection is honoured.
+      - name: Generate image SBOM (linux/amd64)
+        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
+        env:
+          SYFT_PLATFORM: linux/amd64
+        with:
+          image: ${{ env.IMAGE_REPO }}@${{ steps.build.outputs.digest }}
+          registry-username: ${{ github.actor }}
+          registry-password: ${{ secrets.GITHUB_TOKEN }}
+          format: spdx-json
+          artifact-name: spillway_${{ steps.vars.outputs.version }}_linux_amd64_sbom.spdx.json
+          output-file: dist/spillway_${{ steps.vars.outputs.version }}_linux_amd64_sbom.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Generate image SBOM (linux/arm64)
+        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
+        env:
+          SYFT_PLATFORM: linux/arm64
+        with:
+          image: ${{ env.IMAGE_REPO }}@${{ steps.build.outputs.digest }}
+          registry-username: ${{ github.actor }}
+          registry-password: ${{ secrets.GITHUB_TOKEN }}
+          format: spdx-json
+          artifact-name: spillway_${{ steps.vars.outputs.version }}_linux_arm64_sbom.spdx.json
+          output-file: dist/spillway_${{ steps.vars.outputs.version }}_linux_arm64_sbom.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Attest image SBOMs (keyless, by digest)
+        shell: bash
+        env:
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+          VERSION: ${{ steps.vars.outputs.version }}
+        run: |
+          for arch in amd64 arm64; do
+            sbom="dist/spillway_${VERSION}_linux_${arch}_sbom.spdx.json"
+            test -s "$sbom"
+            cosign attest --yes --type spdxjson --predicate "$sbom" "${IMAGE_REPO}@${IMAGE_DIGEST}"
+          done
+
       - name: Package and push Helm chart (OCI)
+        id: chart
         shell: bash
         run: |
           mkdir -p dist
           helm lint charts/spillway
           helm package charts/spillway --destination dist
-          helm push "dist/spillway-${{ steps.vars.outputs.version }}.tgz" "${{ env.CHART_OCI_REPO }}"
+          helm push "dist/spillway-${{ steps.vars.outputs.version }}.tgz" "${{ env.CHART_OCI_REPO }}" | tee push.log
+          digest="$(awk '/^Digest:/{print $2}' push.log)"
+          rm -f push.log
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
+      - name: Sign Helm chart (keyless, by digest)
+        shell: bash
+        env:
+          CHART_DIGEST: ${{ steps.chart.outputs.digest }}
+        run: |
+          [[ "$CHART_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          cosign sign --yes "${CHART_PACKAGE_REPO}@${CHART_DIGEST}"
 
       - name: Setup oras
         uses: oras-project/setup-oras@22ce207df3b08e061f537244349aac6ae1d214f6 # v1.2.4
@@ -126,6 +215,9 @@ jobs:
         with:
           generate_release_notes: true
           prerelease: ${{ steps.vars.outputs.is_prerelease == 'true' }}
+          fail_on_unmatched_files: true
           files: |
             dist/*.tar.gz
             dist/checksums.txt
+            dist/checksums.txt.sigstore.json
+            dist/*_sbom.spdx.json

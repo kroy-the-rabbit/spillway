@@ -53,11 +53,61 @@ metrics ingress to pods in the release namespace; add explicit
 
 ### Supply chain
 
-Container images are published to `ghcr.io/kroy-the-rabbit/spillway`.
-Images are **not yet signed** — cosign signing and SBOM generation are
-planned but not yet implemented. Pin to a specific image digest or tag
-rather than `latest` and verify the digest matches the GitHub release
-before deploying in sensitive environments.
+Container images are published to `ghcr.io/kroy-the-rabbit/spillway` and
+the Helm chart to `oci://ghcr.io/kroy-the-rabbit/charts/spillway`. Every
+release is signed keylessly with [Sigstore cosign](https://github.com/sigstore/cosign)
+using the GitHub Actions OIDC identity of the release workflow, and ships
+SPDX SBOMs. Verification requires cosign v3.0 or newer (signatures use the
+Sigstore bundle format).
+
+The signing identity for a release tag `vX.Y.Z` is
+`https://github.com/kroy-the-rabbit/spillway/.github/workflows/release.yaml@refs/tags/vX.Y.Z`
+issued by `https://token.actions.githubusercontent.com`.
+
+Verify the container image (replace `<version>` with e.g. `0.5.1`):
+
+```sh
+cosign verify \
+  --certificate-identity-regexp '^https://github.com/kroy-the-rabbit/spillway/.github/workflows/release.yaml@refs/tags/v' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  ghcr.io/kroy-the-rabbit/spillway:<version>
+```
+
+Verify the Helm chart:
+
+```sh
+cosign verify \
+  --certificate-identity-regexp '^https://github.com/kroy-the-rabbit/spillway/.github/workflows/release.yaml@refs/tags/v' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  ghcr.io/kroy-the-rabbit/charts/spillway:<version>
+```
+
+Verify the binary checksums (`checksums.txt` and `checksums.txt.sigstore.json`
+are attached to the GitHub release), then check the tarballs against them:
+
+```sh
+cosign verify-blob \
+  --bundle checksums.txt.sigstore.json \
+  --certificate-identity-regexp '^https://github.com/kroy-the-rabbit/spillway/.github/workflows/release.yaml@refs/tags/v' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  checksums.txt
+sha256sum --check --ignore-missing checksums.txt
+```
+
+Verify the image SBOM attestations (one SPDX SBOM per platform is attested
+to the multi-arch image; the same SBOMs plus a source-tree SBOM are attached
+to the GitHub release as `spillway_<version>_*_sbom.spdx.json`):
+
+```sh
+cosign verify-attestation --type spdxjson \
+  --certificate-identity-regexp '^https://github.com/kroy-the-rabbit/spillway/.github/workflows/release.yaml@refs/tags/v' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  ghcr.io/kroy-the-rabbit/spillway:<version>
+```
+
+To pin to exactly one release, replace `--certificate-identity-regexp` with
+`--certificate-identity https://github.com/kroy-the-rabbit/spillway/.github/workflows/release.yaml@refs/tags/v<version>`.
+Pin deployments to an image digest rather than `latest` in sensitive environments.
 
 GitHub Actions workflows are pinned to commit SHAs to prevent silent
 supply chain updates.
